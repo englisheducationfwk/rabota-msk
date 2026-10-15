@@ -183,6 +183,78 @@ def run_once(cfg: dict, session) -> dict:
     return state
 
 
+def is_active_now(cfg: dict, now: time.struct_time | None = None) -> bool:
+    """🕐 Можно ли собирать прямо сейчас (по режиму и часам)."""
+    now = now or time.localtime()
+    mode = str(cfg.get("mode") or "daily")
+    if mode == "frequent":
+        start = int(cfg.get("active_from") or 8)
+        end = int(cfg.get("active_to") if cfg.get("active_to") is not None
+                  else 24)
+        hour = now.tm_hour
+        if start <= end:
+            return start <= hour < end
+        return hour >= start or hour < end
+    # daily: по умолчанию — только в заданные часы, но первый запуск
+    # (при включении сервера) собираем сразу — этого хочет пользователь
+    return True
+
+
+def _nearest_daily_wait(cfg: dict, seconds_now: int) -> int:
+    """⏰ Секунд до ближайшего «часа сбора» (daily-режим)."""
+    hours = sorted(int(h) for h in (cfg.get("daily_hours") or [10, 19]))
+    best: int | None = None
+    for hour in hours:
+        left = hour * 3600 - seconds_now
+        if left <= 60:  # этот час уже прошёл (или наступит через секунду)
+            left += 86400
+        if best is None or left < best:
+            best = left
+    return (best or 86400) + 60
+
+
+def wait_seconds(cfg: dict, state: dict) -> int:
+    """⏰ Сколько спать до следующего цикла.
+
+    Режим daily (по умолчанию): сбор 2 раза в день — в часы daily_hours
+    (по умолчанию 10:00 и 19:00 — утро и вечер, когда публикуют больше).
+    Режим frequent (доп. свитч): те же 2 раза плюс каждые interval_min
+    минут с active_from до active_to (ночью спим).
+    """
+    mode = str(cfg.get("mode") or "daily")
+    now = time.localtime()
+    seconds_now = now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec
+    if mode == "frequent":
+        interval = max(5, int(cfg.get("interval_min") or 15))
+        wait = interval * 60
+        start = int(cfg.get("active_from") or 8)
+        end = int(cfg.get("active_to") if cfg.get("active_to") is not None
+                  else 24)
+        if end < 24:
+            gap = end * 3600 - seconds_now
+            if gap <= 0:
+                wait = _nearest_daily_wait(cfg, seconds_now)
+            else:
+                wait = min(wait, max(60, gap))
+        elif not is_active_now(cfg, now):
+            wait = _nearest_daily_wait(cfg, seconds_now)
+    else:
+        wait = _nearest_daily_wait(cfg, seconds_now)
+    if state.get("state") in ("firewall", "tunnel"):
+        wait = min(wait, 30 * 60)  # после заслона не частим
+    return wait
+
+
+def _schedule_signature(cfg: dict) -> tuple:
+    """🧾 Отпечаток расписания: если поменялся — перечитываем настройки."""
+    return (str(cfg.get("mode") or "daily"),
+            int(cfg.get("interval_min") or 15),
+            int(cfg.get("active_from") or 8),
+            int(cfg.get("active_to") if cfg.get("active_to") is not None
+                else 24),
+            tuple(int(h) for h in (cfg.get("daily_hours") or [10, 19])))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Работа MSK: сбор Авито")
     parser.add_argument("--once", action="store_true",
@@ -194,26 +266,55 @@ def main() -> int:
     cfg = settings.load()
     if args.interval:
         cfg["interval_min"] = args.interval
-    interval = max(5, int(cfg.get("interval_min") or 15))
 
     session = make_session()
     if args.once:
         state = run_once(cfg, session)
         return 0 if state.get("state") == "ok" else 1
 
-    log(f"🚜 Работа MSK запущена. Период: {interval} мин. "
+    mode = str(cfg.get("mode") or "daily")
+    if mode == "frequent":
+        mode_text = (f"каждые {int(cfg.get('interval_min') or 15)} мин "
+                     f"({cfg.get('active_from')}:00–{cfg.get('active_to')}:00)"
+                     f" + утро/вечер")
+    else:
+        hours = ", ".join(f"{int(h)}:00" for h in
+                          (cfg.get("daily_hours") or [10, 19]))
+        mode_text = f"2 раза в день ({hours})"
+    log(f"🚜 Работа MSK запущена. Режим: {mode_text}. "
         f"Запросов: {len(cfg.get('queries') or [])}")
+
+    first = True
     while True:
-        state = run_once(cfg, session)
-        wait = interval * 60
-        if state.get("state") in ("firewall", "tunnel"):
-            wait = min(wait, 30 * 60)  # после заслона не частим
-        log(f"😴 Следующий цикл через {wait // 60} мин")
-        # сон кусками, чтобы панель могла остановить процесс по Ctrl+C
+        if not first and not is_active_now(cfg):
+            wait = wait_seconds(cfg, {"state": "idle"})
+            hours, mins = wait // 3600, (wait % 3600) // 60
+            store.save_status({"state": "idle",
+                               "message": "Ночная пауза — утром всё соберу",
+                               "next_run": int(time.time()) + wait})
+            log(f"🌙 Ночь: сплю до ближайшего часа сбора "
+                f"({hours} ч {mins} мин)")
+        else:
+            first = False
+            state = run_once(cfg, session)
+            wait = wait_seconds(cfg, state)
+            hours, mins = wait // 3600, (wait % 3600) // 60
+            log(f"😴 Следующий цикл через {hours} ч {mins} мин")
+        # сон кусками; раз в 30 секунд сверяем расписание из настроек
+        signature = _schedule_signature(cfg)
         end = time.time() + wait
+        last_check = time.time()
         while time.time() < end:
             time.sleep(5)
-        cfg = settings.load()  # настройки могли поменять из панели
+            if time.time() - last_check >= 30:
+                last_check = time.time()
+                fresh = settings.load()
+                if _schedule_signature(fresh) != signature:
+                    log("⚙️ Расписание изменилось — перечитываю настройки.")
+                    cfg = fresh
+                    break
+        else:
+            cfg = settings.load()  # настройки могли поменять из панели
 
 
 if __name__ == "__main__":

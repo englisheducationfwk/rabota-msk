@@ -80,6 +80,7 @@ class Panel(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
         self.after(300, self._pump_log)
         self.after(400, self._tick_status)
+        self._refresh_mode_ui()
         self._start_tray()
         if self.cfg.get("auto_start", True):
             self.after(1200, self._maybe_autostart)
@@ -119,6 +120,20 @@ class Panel(tk.Tk):
                    command=self._open_site).pack(side="left", padx=(10, 0))
         ttk.Button(body, text="👁 Посмотреть у себя",
                    command=self._preview).pack(side="left", padx=(10, 0))
+
+        mode_row = ttk.Frame(self, padding=(16, 6, 16, 0))
+        mode_row.pack(fill="x")
+        ttk.Label(mode_row, text="Режим сбора:").pack(side="left")
+        self.btn_mode_daily = ttk.Button(
+            mode_row, text="🕐 2 раза в день",
+            command=lambda: self._set_mode("daily"))
+        self.btn_mode_daily.pack(side="left", padx=(8, 0))
+        self.btn_mode_freq = ttk.Button(
+            mode_row, text="⚡ каждые 15 минут",
+            command=lambda: self._set_mode("frequent"))
+        self.btn_mode_freq.pack(side="left", padx=(6, 0))
+        self.lbl_mode = ttk.Label(mode_row, text="", style="Muted.TLabel")
+        self.lbl_mode.pack(side="left", padx=(10, 0))
 
         status = ttk.Frame(self, padding=(16, 6, 16, 4))
         status.pack(fill="x")
@@ -187,13 +202,39 @@ class Panel(tk.Tk):
         def quit_all(icon, item):
             self.after(0, self._quit)
 
+        def set_mode(mode: str):
+            def handler(icon, item):
+                def apply() -> None:
+                    cfg = settings.load()
+                    cfg["mode"] = mode
+                    settings.save(cfg)
+                    self._log(f"🔁 Режим сбора: {self._mode_text()}")
+                    try:
+                        icon.update_menu()
+                    except Exception:
+                        pass
+                self.after(0, apply)
+            return handler
+
         def status_text(item):
             running = bool(self.proc and self.proc.poll() is None)
             return "⏹ Выключить сбор" if running else "▶ Включить сбор"
 
+        def mode_checked(mode: str):
+            def check(item) -> bool:
+                return str(settings.load().get("mode") or "daily") == mode
+            return check
+
         menu = pystray.Menu(
             pystray.MenuItem("Открыть панель", open_panel, default=True),
             pystray.MenuItem(status_text, toggle),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Режим: 2 раза в день (10:00, 19:00)",
+                             set_mode("daily"),
+                             checked=mode_checked("daily"), radio=True),
+            pystray.MenuItem("Режим: каждые 15 минут (8:00–24:00)",
+                             set_mode("frequent"),
+                             checked=mode_checked("frequent"), radio=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Выйти совсем", quit_all),
         )
@@ -350,6 +391,39 @@ class Panel(tk.Tk):
             self.log_queue.put(f"⚠️ Публикация не удалась: "
                                f"{type(exc).__name__}: {exc}")
 
+    def _mode_text(self) -> str:
+        """📝 Человеческое имя текущего режима сбора."""
+        cfg = settings.load()
+        if str(cfg.get("mode") or "daily") == "frequent":
+            return (f"каждые {int(cfg.get('interval_min') or 15)} мин "
+                    f"({int(cfg.get('active_from') or 8)}:00–"
+                    f"{int(cfg.get('active_to') or 24)}:00) + утро/вечер")
+        hours = ", ".join(f"{int(h)}:00" for h in
+                          (cfg.get("daily_hours") or [10, 19]))
+        return f"2 раза в день ({hours})"
+
+    # --- режим сбора ---------------------------------------------------------
+    def _set_mode(self, mode: str) -> None:
+        """🔁 Переключить режим: 2 раза в день ‖ каждые 15 минут."""
+        cfg = settings.load()
+        cfg["mode"] = mode
+        settings.save(cfg)
+        self._refresh_mode_ui()
+        self._log(f"🔁 Режим сбора: {self._mode_text()}. "
+                  f"Сбор подхватит в течение 30 секунд.")
+
+    def _refresh_mode_ui(self) -> None:
+        """Подсветить активную кнопку режима и подпись."""
+        try:
+            mode = str(settings.load().get("mode") or "daily")
+            self.btn_mode_daily.state(["pressed"] if mode == "daily"
+                                      else ["!pressed"])
+            self.btn_mode_freq.state(["pressed"] if mode == "frequent"
+                                     else ["!pressed"])
+            self.lbl_mode.configure(text="сейчас: " + self._mode_text())
+        except Exception:
+            pass
+
     # --- автозагрузка -------------------------------------------------------
     def _autostart_enabled(self) -> bool:
         """Проверить запись автозагрузки в реестре (Run)."""
@@ -413,7 +487,11 @@ class Panel(tk.Tk):
         cfg = settings.load()
         rows = [
             ("Запросы к Авито (по одному в строке)", "queries", "text"),
-            ("Интервал автосбора, минут", "interval_min", "int"),
+            ("Часы сбора «2 раза в день» (через запятую)", "daily_hours",
+             "str"),
+            ("Интервал «каждые 15 минут», минут", "interval_min", "int"),
+            ("…собирать с часа (0–24)", "active_from", "int"),
+            ("…и до часа (0–24, 24 = до полуночи)", "active_to", "int"),
             ("Минимальная зарплата ₽/мес (0 — все)", "min_salary_month", "int"),
             ("Telegram-токен (опция)", "telegram_token", "str"),
             ("Telegram chat_id", "telegram_chat", "str"),
@@ -436,7 +514,13 @@ class Panel(tk.Tk):
                 box.grid(row=idx, column=1, sticky="we", pady=(6, 0))
                 widgets[key] = box
             else:
-                var = tk.StringVar(value=str(cfg.get(key) or ""))
+                if key == "daily_hours":
+                    value = ", ".join(str(int(h)) for h in
+                                      (cfg.get(key) or [10, 19]))
+                else:
+                    value = str(cfg.get(key) if cfg.get(key) is not None
+                                else "")
+                var = tk.StringVar(value=value)
                 ent = ttk.Entry(frame, textvariable=var, width=48)
                 ent.grid(row=idx, column=1, sticky="we", pady=(6, 0))
                 widgets[key] = var
@@ -470,17 +554,29 @@ class Panel(tk.Tk):
             new["queries"] = [q.strip() for q in
                               widgets["queries"].get("1.0", "end").splitlines()
                               if q.strip()]
-            for key in ("interval_min", "min_salary_month"):
+            for key in ("interval_min", "min_salary_month",
+                        "active_from", "active_to"):
                 try:
                     new[key] = max(0, int(widgets[key].get()))
                 except (ValueError, tk.TclError):
                     pass
             new["interval_min"] = max(5, int(new.get("interval_min") or 15))
+            new["active_from"] = min(24, max(0, int(new.get("active_from", 8))))
+            new["active_to"] = min(24, max(0, int(new.get("active_to", 24))))
+            # «10, 19» → [10, 19]
+            hours = []
+            for token in str(widgets["daily_hours"].get()).replace(";", ",") \
+                    .split(","):
+                token = token.strip()
+                if token.isdigit():
+                    hours.append(min(24, max(0, int(token))))
+            new["daily_hours"] = sorted(set(hours)) or [10, 19]
             for key in ("telegram_token", "telegram_chat", "repo_url",
                         "repo_branch", "site_url"):
                 new[key] = widgets[key].get().strip()
             settings.save(new)
             self.cfg = new
+            self._refresh_mode_ui()
             self._log("⚙️ Настройки сохранены.")
             win.destroy()
 
