@@ -112,12 +112,21 @@
   }
 
   /* --- данные ---
-     Два источника по очереди: сначала соседний файл (локальный
-     предпросмотр с компьютера), потом — свежий JSON из ветки данных
-     на GitHub (его каждые 15 минут обновляет компьютер). */
-  var RAW_DATA = "https://raw.githubusercontent.com/englisheducationfwk/" +
-                 "rabota-msk/data/vacancies.json";
-  var SOURCES = ["data/vacancies.json", RAW_DATA];
+     Источники по очереди:
+     1) соседний файл (локальный предпросмотр с компьютера);
+     2) GitHub API — самый свежий (кэш минуту, после публикации сразу видно);
+     3) raw.githubusercontent — запасной (CDN может держать старую копию).
+     Если переименуете репозиторий — поправьте адреса ниже. */
+  var REPO = "englisheducationfwk/rabota-msk";
+  var RAW_DATA = "https://raw.githubusercontent.com/" + REPO +
+                 "/data/vacancies.json";
+  var API_DATA = "https://api.github.com/repos/" + REPO +
+                 "/contents/vacancies.json?ref=data";
+  var SOURCES = [
+    { url: API_DATA, headers: { "Accept": "application/vnd.github.raw+json" } },
+    { url: "data/vacancies.json" },
+    { url: RAW_DATA }
+  ];
 
   function fetchData() {
     tryNext(0);
@@ -131,9 +140,10 @@
       render("refresh");
       return;
     }
-    var url = SOURCES[i] + (SOURCES[i].indexOf("?") === -1 ? "?" : "&") +
+    var src = SOURCES[i];
+    var url = src.url + (src.url.indexOf("?") === -1 ? "?" : "&") +
               "t=" + Date.now();
-    fetch(url, { cache: "no-store" })
+    fetch(url, { cache: "no-store", headers: src.headers || {} })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
@@ -443,7 +453,8 @@
     var y = LS.get("msk_scroll_y", 0);
     if (y > 100) { window.scrollTo(0, y); }
   }, 700);
-  setInterval(fetchData, 3 * 60 * 1000);
+  // обновляем данные раз в 5 минут (и при каждом возврате на страницу)
+  setInterval(fetchData, 5 * 60 * 1000);
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) fetchData();
   });
