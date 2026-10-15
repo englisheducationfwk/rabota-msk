@@ -28,7 +28,7 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; overflow-x: clip; }
 body {
   margin: 0;
   background: var(--bg);
@@ -36,6 +36,23 @@ body {
   font: 17px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
   padding-bottom: env(safe-area-inset-bottom);
   touch-action: manipulation;
+  overflow-x: clip;          /* никакого бокового растяжения */
+  max-width: 100%;
+}
+
+/* длинные ссылки/слова в текстах не растягивают карточки */
+.card-title, .desc, .emp, .addr, .price, .reasons li, .brand-sub {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.seg { min-width: 0; }
+.seg button { max-width: 100%; }
+
+/* предупреждение «открыта версия для ПК» (телефон, но вьюпорт широкий) */
+.pc-hint {
+  margin: 10px 14px 0; padding: 12px 14px; border-radius: 14px;
+  background: var(--card); border: 1px solid var(--warn);
+  color: var(--fg); font-size: 15px; line-height: 1.4;
 }
 
 /* --- шапка --- */

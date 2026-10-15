@@ -49,6 +49,22 @@
     toTop: document.getElementById("to-top")
   };
 
+  /* 📱 Страховка от «версии для ПК»: если это телефон, а вьюпорт почему-то
+     широкий (Safari запомнил «Сайт для ПК» или кривой вебвью), показываем
+     подсказку, как вернуть мобильный вид. Длинные строки в это время уже
+     не растягивают страницу — за это отвечает CSS (overflow-x: clip). */
+  (function pcHint() {
+    var ua = navigator.userAgent || "";
+    var isPhone = /iPhone|iPod|Android/i.test(ua);
+    if (!isPhone || window.innerWidth <= 700) return;
+    var hint = document.createElement("div");
+    hint.className = "pc-hint";
+    hint.innerHTML = "Похоже, открылся «сайт для ПК». В Safari нажмите "
+      + "<b>«аА»</b> в адресной строке → <b>«Версия для мобильного»</b> — "
+      + "и страница станет удобной.";
+    document.body.insertBefore(hint, document.body.firstChild);
+  })();
+
   /* --- утилиты --- */
   function esc(s) {
     return String(s == null ? "" : s)
