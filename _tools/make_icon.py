@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""🎨 Иконка страницы: генерим PNG-ки без интернета (PIL есть на ПК).
+"""🎨 Иконка приложения: скруглённый квадрат с градиентом и буквой «Р».
 
-Рисуем скруглённый квадрат с градиентом и метёлкой 🧹 (шрифт эмодзи
-Windows — seguiemj.ttf). Результат: docs/apple-touch-icon.png (180),
-docs/icon-192.png, docs/icon-512.png.
+Без эмодзи-метлы: спокойный брендовый знак — градиент (фиолетовый →
+бирюзовый) и белая «Р» шрифтом Segoe UI Bold. Результат:
+docs/apple-touch-icon.png (180), docs/icon-192.png, docs/icon-512.png.
 """
 
 from __future__ import annotations
@@ -17,7 +17,12 @@ DOCS = ROOT / "docs"
 
 GRAD_FROM = (124, 108, 255)   # фиолетовый — как акцент страницы
 GRAD_TO = (61, 217, 192)      # бирюзовый
-EMOJI_FONT = r"C:\Windows\Fonts\seguiemj.ttf"
+LETTER = "Р"
+BOLD_FONTS = [
+    r"C:\Windows\Fonts\seguibl.ttf",
+    r"C:\Windows\Fonts\segoeuib.ttf",
+    r"C:\Windows\Fonts\arialbd.ttf",
+]
 
 
 def rounded_gradient(size: int) -> Image.Image:
@@ -42,20 +47,27 @@ def rounded_gradient(size: int) -> Image.Image:
     return img
 
 
-def with_emoji(size: int) -> Image.Image:
-    """🧹 Иконка с метёлкой по центру (или чистый градиент без шрифта)."""
+def with_letter(size: int) -> Image.Image:
+    """🅿️ Белая «Р» по центру (крупно, с лёгкой тенью для чёткости)."""
     img = rounded_gradient(size)
-    try:
-        font = ImageFont.truetype(EMOJI_FONT, int(size * 0.62))
-        draw = ImageDraw.Draw(img)
-        text = "🧹"
-        box = draw.textbbox((0, 0), text, font=font, embedded_color=True)
-        w = box[2] - box[0]
-        h = box[3] - box[1]
-        draw.text(((size - w) / 2 - box[0], (size - h) / 2 - box[1]), text,
-                  font=font, embedded_color=True)
-    except Exception:
-        pass
+    font = None
+    for path in BOLD_FONTS:
+        try:
+            font = ImageFont.truetype(path, int(size * 0.60))
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    draw = ImageDraw.Draw(img)
+    box = draw.textbbox((0, 0), LETTER, font=font)
+    w, h = box[2] - box[0], box[3] - box[1]
+    x = (size - w) / 2 - box[0]
+    y = (size - h) / 2 - box[1] - int(size * 0.02)
+    # тень
+    draw.text((x + max(1, size // 90), y + max(1, size // 90)), LETTER,
+              font=font, fill=(20, 20, 45, 90))
+    draw.text((x, y), LETTER, font=font, fill=(255, 255, 255, 255))
     return img
 
 
@@ -64,9 +76,15 @@ def main() -> None:
     for size, name in ((180, "apple-touch-icon.png"),
                        (192, "icon-192.png"),
                        (512, "icon-512.png")):
-        img = with_emoji(size).convert("RGB")
+        img = with_letter(size).convert("RGB")
         img.save(DOCS / name, "PNG")
-        print(f"✅ {name} ({size}x{size})")
+        print(f"OK {name} ({size}x{size})")
+    # .ico для ярлыка
+    icon = with_letter(256)
+    icon.save(DOCS / "msk.ico",
+              sizes=[(256, 256), (128, 128), (64, 64), (48, 48),
+                     (32, 32), (16, 16)])
+    print("OK msk.ico")
 
 
 if __name__ == "__main__":

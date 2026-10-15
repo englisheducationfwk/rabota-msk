@@ -4,7 +4,7 @@
 Как устроено:
     · ярлык на рабочем столе → открывает это окно;
     · окно можно свернуть в трей (крестик прячет, а не закрывает);
-    · в трее иконка 🧹 с меню: открыть панель / вкл-выкл сбора / выход;
+    · в трее иконка с меню: открыть панель / вкл-выкл сбора / выход;
     · автозапуск: папка «Автозагрузка» Windows (ставится кнопкой в
       настройках) — после перезагрузки ПК сервер поднимается сам;
     · при включении сбор идёт сразу и дальше каждые 15 минут.
@@ -101,7 +101,7 @@ class Panel(tk.Tk):
 
         top = ttk.Frame(self, padding=(16, 14, 16, 6))
         top.pack(fill="x")
-        ttk.Label(top, text="🧹 Работа MSK", font=FONT_TITLE).pack(side="left")
+        ttk.Label(top, text="💼 Работа MSK", font=FONT_TITLE).pack(side="left")
         ttk.Button(top, text="В трей", command=self._hide_to_tray) \
             .pack(side="right")
         self.lbl_ip = ttk.Label(top, text="", style="Muted.TLabel")
@@ -144,7 +144,7 @@ class Panel(tk.Tk):
         self.lbl_detail.pack(anchor="w", pady=(2, 0))
         self.lbl_hint = ttk.Label(
             status, text="Окно можно закрыть — сбор продолжит работать "
-                         "в трее (иконка 🧹 рядом с часами).",
+                         "в трее (иконка 💼 рядом с часами).",
             style="Muted.TLabel")
         self.lbl_hint.pack(anchor="w", pady=(2, 0))
 
@@ -185,7 +185,7 @@ class Panel(tk.Tk):
         return Image.new("RGB", (64, 64), (124, 108, 255))
 
     def _start_tray(self) -> None:
-        """🧹 Иконка в трее с меню — окно можно закрыть, сервер останется."""
+        """Иконка в трее с меню — окно можно закрыть, сервер останется."""
         try:
             import pystray
         except ImportError:
@@ -251,7 +251,7 @@ class Panel(tk.Tk):
             return
         self.withdraw()
         self._log("🙈 Свернулись в трей — сбор продолжается. "
-                  "Иконка 🧹 рядом с часами.")
+                  "Иконка 💼 рядом с часами.")
 
     def _show_window(self) -> None:
         """👀 Вернуть окно из трея."""

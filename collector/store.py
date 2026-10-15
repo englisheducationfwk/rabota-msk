@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""🗄️ База: SQLite (история и дедупликация) + JSON для страницы мамы.
+"""🗄️ База: SQLite (история и дедупликация) + JSON для страницы.
 
 SQLite держит всё, что видели: первую и последнюю встречу каждой вакансии,
 описание, рейтинг работодателя, оценку мозга. Наружу (на страницу) уходит
@@ -177,7 +177,7 @@ def log_run(con: sqlite3.Connection, found: int, relevant: int, fresh: int,
 
 
 def export_site(con: sqlite3.Connection, fresh_since: int) -> dict:
-    """🌐 Срез для страницы мамы: последние подходящие, свежие сверху.
+    """🌐 Срез для страницы: последние подходящие, свежие сверху.
 
     fresh_since — отметка времени прошлого визита (что «новое»).
     Возвращает готовый словарь (он же пишется в JSON).
@@ -232,7 +232,7 @@ def save_status(payload: dict) -> None:
 
 
 def new_since(con: sqlite3.Connection) -> int:
-    """🕐 Время последнего визита мамы (0 — ещё не заходила: всё новое)."""
+    """🕐 Время последнего визита (0 — ещё не заходили: всё новое)."""
     row = con.execute("SELECT value FROM meta WHERE key='last_visit'") \
         .fetchone()
     try:

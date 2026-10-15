@@ -3,8 +3,8 @@
 
 Три операции:
     send(...)      — отправить текст (HTML-разметка);
-    find_chat(...) — найти chat_id: мама жмёт Start у бота, панель ловит;
-    digest(...)    — красивая сводка новинок для мамы.
+    find_chat(...) — найти chat_id: человек жмёт Start у бота, панель ловит;
+    digest(...)    — красивая сводка новинок.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def check(token: str) -> tuple[bool, str]:
 
 
 def find_chat(token: str) -> tuple[bool, str, str]:
-    """💬 Поймать chat_id: мама отправляет боту /start, панель ищет.
+    """💬 Поймать chat_id: человек отправляет боту /start, панель ищет.
 
     Возвращает (ок, chat_id или "", понятное сообщение).
     """
@@ -57,8 +57,8 @@ def find_chat(token: str) -> tuple[bool, str, str]:
                                         chat.get("last_name")) if x)
             chats.append((int(chat["id"]), name or str(chat["id"])))
     if not chats:
-        return False, "", ("Никто ещё не написал боту. Попросите маму "
-                           "нажать Start в Telegram — и нажмите снова.")
+        return False, "", ("Никто ещё не написал боту. Откройте Telegram, "
+                           "нажмите Start у бота — и повторите поиск.")
     chat_id, name = chats[-1]
     return True, str(chat_id), f"Найден чат: {name}"
 

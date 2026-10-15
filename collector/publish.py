@@ -5,7 +5,7 @@
 один коммит, который обновляется amend-ом и уезжает force-push-ом.
 Никакого замусоривания истории — репозиторий всегда чистый.
 
-Страница мамы берёт свежий JSON по адресу
+Страница берёт свежий JSON по адресу
     https://raw.githubusercontent.com/<user>/<repo>/<branch>/vacancies.json
 подставляя метку времени — так кэш CDN не мешает свежести.
 """
@@ -37,7 +37,7 @@ def _git(args: list[str], cwd: Path, timeout: int = 120) -> tuple[int, str]:
 
 
 def raw_url(repo_url: str, branch: str) -> str:
-    """🌐 Адрес сырого JSON (то, что тянет страница мамы)."""
+    """🌐 Адрес сырого JSON (то, что тянет страница)."""
     repo = repo_url.rstrip("/")
     for prefix in ("https://github.com/", "git@github.com:"):
         if repo.startswith(prefix):
@@ -87,5 +87,5 @@ def publish(repo_url: str, branch: str, payload: dict,
 
 
 def clear_clone() -> None:
-    """🧹 Забыть локальный клон (если репозиторий перенастроили)."""
+    """Забыть локальный клон (если репозиторий перенастроили)."""
     shutil.rmtree(CLONE_DIR, ignore_errors=True)

@@ -31,7 +31,7 @@ DEFAULTS = {
     "repo_branch": "data",         # ветка с данными (один обновляемый коммит)
     "site_url": "",                # https://<user>.github.io/rabota-msk/
     "telegram_token": "",          # опция: пусто = выключено
-    "telegram_chat": "",           # chat_id мамы (ловится кнопкой «Привязать»)
+    "telegram_chat": "",           # chat_id владельца (ловится кнопкой «Привязать»)
     "headless": False,             # Авито пропускает живой браузер, не headless
     "auto_start": True,            # при открытии панели сбор стартует сам
     "auto_restart": True,          # если сбор упал — поднять заново
