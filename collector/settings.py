@@ -28,7 +28,9 @@ DEFAULTS = {
     "site_url": "",                # https://<user>.github.io/rabota-msk/
     "telegram_token": "",          # опция: пусто = выключено
     "telegram_chat": "",           # chat_id мамы (ловится кнопкой «Привязать»)
-    "headless": True,              # браузер без окна (окно — для отладки)
+    "headless": False,             # Авито пропускает живой браузер, не headless
+    "auto_start": True,            # при открытии панели сбор стартует сам
+    "auto_restart": True,          # если сбор упал — поднять заново
 }
 
 

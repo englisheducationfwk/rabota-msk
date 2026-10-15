@@ -33,7 +33,8 @@ def demo_payload() -> dict:
              url="https://www.avito.ru/demo/1", price="5 000 ₽ за смену",
              salary_month=105000, salary_unit="смена", employer="Отель Ритц",
              metro="м. Тверская", address="Москва, ул. Тверская",
-             published=now - 600, description=(
+             published=now - 600, published_text="сегодня в 17:02",
+             description=(
                  "Уборка номеров, 15 номеров за смену. График 2/2, "
                  "смены с 9 до 21. Без оформления, оплата на руки в конце "
                  "смены. Питание и форма предоставляются."),
@@ -48,21 +49,23 @@ def demo_payload() -> dict:
              url="https://www.avito.ru/demo/2", price="90 000 ₽",
              salary_month=90000, salary_unit="месяц", employer="Семья",
              metro="", address="Московская обл., Барвиха",
-             published=now - 3600 * 3, description=(
+             published=now - 3600 * 3, published_text="сегодня в 14:40",
+             description=(
                  "Семья ищет домработницу. Уборка дома 300 м², глажка, "
                  "простая готовка. Пятидневка. Помощь по хозяйству. "
                  "Обязательно с опытом в частных домах."),
              score=78, reasons=["+10, Оплата 90 000 ₽",
-                                "+10, Есть проживание/питание",
                                 "+8, Рейтинг работодателя 4.2 (7 отз.)"],
              unofficial=False, housing=True, first_seen=now - 3600,
              rating={"score": 4.2, "reviews": 7}, employer_id="88",
              status="new", query="домработница"),
         dict(id="3", title="Уборщица в бизнес-центр, смена 12 часов",
              url="https://www.avito.ru/demo/3", price="3 800 ₽ за смену",
-             salary_month=79800, salary_unit="смена", employer="Клининговая компания",
+             salary_month=79800, salary_unit="смена",
+             employer="Клининговая компания",
              metro="м. Киевская", address="Москва, БЦ",
-             published=now - 3600 * 26, description=(
+             published=now - 3600 * 26, published_text="вчера в 15:10",
+             description=(
                  "Уборка офисных помещений по маршруту. Смена 12 часов, "
                  "график 1/1 или 2/2 на выбор. Ежедневная оплата на карту "
                  "или наличными."),
@@ -75,11 +78,11 @@ def demo_payload() -> dict:
              url="https://www.avito.ru/demo/4", price="по договорённости",
              salary_month=0, salary_unit="", employer="",
              metro="м. Планерная", address="Москва",
-             published=now - 3600 * 50, description=(
+             published=now - 3600 * 50, published_text="12 октября в 11:20",
+             description=(
                  "Вахта 15/15 в загородном доме отдыха. Проживание в "
                  "хорошем общежитии, питание. Уборка номеров."),
-             score=54, reasons=["-8, Зарплата не указана",
-                                "+10, Есть проживание/питание"],
+             score=54, reasons=["-8, Зарплата не указана"],
              unofficial=False, housing=True, first_seen=now - 3600 * 49,
              rating={}, employer_id="", status="new", query="горничная вахта"),
     ]
@@ -126,10 +129,15 @@ def main() -> int:
             errors.append("ошибки JS: " + "; ".join(console_errors[:3]))
         page.screenshot(path=str(SHOTS / "page_iphone.png"))
 
-        # прокрутка вниз — вторая карточка в кадре
+        # прокрутка вниз — вторая карточка в кадре + кнопка «наверх»
         page.mouse.wheel(0, 700)
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(500)
         page.screenshot(path=str(SHOTS / "page_iphone_scroll.png"))
+        to_top_visible = page.evaluate(
+            "!document.getElementById('to-top').hidden")
+        print(f"📱 Кнопка «наверх» показалась: {to_top_visible}")
+        if not to_top_visible:
+            errors.append("кнопка «наверх» не показалась при прокрутке")
 
         # фильтр «без оформления»
         page.click('[data-filter="unofficial"]')
@@ -139,6 +147,31 @@ def main() -> int:
         print(f"📱 После фильтра «без оформления»: {cards2}")
         if cards2 == 0 or cards2 == cards:
             errors.append("фильтр «без оформления» ничего не изменил")
+        page.click('[data-filter="unofficial"]')  # снять фильтр
+        page.wait_for_timeout(300)
+
+        # «Не подходит» — карточка исчезает сразу
+        page.click('.card .hide-act')
+        page.wait_for_timeout(400)
+        cards3 = page.locator(".card").count()
+        print(f"📱 После «Не подходит»: {cards3}")
+        if cards3 >= cards:
+            errors.append("«Не подходит» не убрал карточку")
+
+        # «Заблокировать» — с подтверждением
+        page.on("dialog", lambda d: d.accept())
+        page.click('.card .block-act')
+        page.wait_for_timeout(400)
+        cards4 = page.locator(".card").count()
+        unblock = page.locator("#unblock-chip").count()
+        print(f"📱 После блокировки: {cards4} карточек, "
+              f"чип «Разблокировать»: {unblock}")
+        if unblock == 0:
+            errors.append("нет чипа «Разблокировать» после блокировки")
+        page.screenshot(path=str(SHOTS / "page_after_block.png"))
+        if unblock:
+            page.click("#unblock-chip")  # вернуть
+            page.wait_for_timeout(300)
 
         # широкая версия
         wide = page.context.browser.new_context(

@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS vacancies (
     metro TEXT,
     address TEXT,
     published_ts INTEGER,
+    published_text TEXT,
     description TEXT,
     params TEXT,
     rating_score REAL,
@@ -80,7 +81,19 @@ def connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    """🧱 Досыпаем колонки, появившиеся в новых версиях (старые базы живы)."""
+    have = {row[1] for row in
+            con.execute("PRAGMA table_info(vacancies)").fetchall()}
+    for column, ddl in (("published_text", "TEXT"),
+                        ("salary_unit", "TEXT")):
+        if column not in have:
+            con.execute(f"ALTER TABLE vacancies ADD COLUMN {column} {ddl}")
+    con.commit()
 
 
 def upsert(con: sqlite3.Connection, item: dict) -> bool:
@@ -97,6 +110,7 @@ def upsert(con: sqlite3.Connection, item: dict) -> bool:
         str(salary.get("unit") or ""),
         item.get("employer"), item.get("employer_id"), item.get("metro"),
         item.get("address"), int(item.get("published_ts") or 0),
+        str(item.get("published_text") or ""),
         item.get("description"), json.dumps(item.get("params") or [],
                                             ensure_ascii=False),
         rating.get("score"), int(rating.get("reviews") or 0),
@@ -109,17 +123,17 @@ def upsert(con: sqlite3.Connection, item: dict) -> bool:
         con.execute("""INSERT INTO vacancies
             (first_seen, last_seen, query, title, url, price_text,
              salary_month, salary_unit, employer, employer_id, metro, address,
-             published_ts, description, params, rating_score,
+             published_ts, published_text, description, params, rating_score,
              rating_reviews, score, relevant, reasons, unofficial, housing, id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (now, now) + common + (vid,))
         con.commit()
         return True
     con.execute("""UPDATE vacancies SET last_seen=?, query=?, title=?,
         url=?, price_text=?, salary_month=?, salary_unit=?, employer=?,
-        employer_id=?, metro=?, address=?, published_ts=?, description=?,
-        params=?, rating_score=?, rating_reviews=?, score=?, relevant=?,
-        reasons=?, unofficial=?, housing=? WHERE id=?""",
+        employer_id=?, metro=?, address=?, published_ts=?, published_text=?,
+        description=?, params=?, rating_score=?, rating_reviews=?, score=?,
+        relevant=?, reasons=?, unofficial=?, housing=? WHERE id=?""",
                 (now,) + common + (vid,))
     con.commit()
     return False
@@ -172,7 +186,7 @@ def export_site(con: sqlite3.Connection, fresh_since: int) -> dict:
         SELECT id, title, url, price_text, salary_month, salary_unit,
                employer, metro, address, published_ts, description, score,
                reasons, unofficial, housing, first_seen, rating_score,
-               rating_reviews, employer_id, status, query
+               rating_reviews, employer_id, status, query, published_text
         FROM vacancies
         WHERE relevant=1 AND status != 'hidden'
         ORDER BY first_seen DESC
@@ -183,7 +197,7 @@ def export_site(con: sqlite3.Connection, fresh_since: int) -> dict:
             "id": r[0], "title": r[1], "url": r[2],
             "price": r[3], "salary_month": r[4], "salary_unit": r[5],
             "employer": r[6], "metro": r[7], "address": r[8],
-            "published": r[9],
+            "published": r[9], "published_text": r[21],
             "description": (r[10] or "")[:1500], "score": r[11],
             "reasons": json.loads(r[12] or "[]"),
             "unofficial": bool(r[13]), "housing": bool(r[14]),

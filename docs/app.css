@@ -148,18 +148,32 @@ main { padding: 6px 14px 20px; display: grid; gap: 12px; }
 .reasons .up { color: var(--good); }
 .reasons .down { color: var(--bad); }
 
-.actions { display: flex; gap: 8px; margin-top: 12px; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  margin-top: 12px; }
 .act {
-  flex: 1; padding: 13px 6px; font-size: 15px; font-weight: 700;
+  padding: 13px 6px; font-size: 15px; font-weight: 700;
   border-radius: 14px; border: 1px solid var(--line);
   background: var(--bg2); color: var(--fg); cursor: pointer;
 }
 .act:active { transform: scale(.97); }
 .act.on { background: var(--acc); border-color: var(--acc); color: #fff; }
-.act.open { background: var(--good); border-color: var(--good);
-  color: #063; color: #053; }
+.act.open { grid-column: 1 / -1; background: var(--good);
+  border-color: var(--good); color: #053; text-align: center;
+  text-decoration: none; }
 .act.hide-act.on { background: var(--bad); border-color: var(--bad);
   color: #fff; }
+.act.block-act { color: var(--bad); border-color: rgba(255, 122, 138, .5); }
+.act.block-act:active { background: rgba(255, 122, 138, .15); }
+
+/* кнопка «наверх» */
+.to-top {
+  position: fixed; right: 14px; bottom: calc(18px + env(safe-area-inset-bottom));
+  width: 52px; height: 52px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--card);
+  color: var(--fg); font-size: 22px; cursor: pointer;
+  box-shadow: var(--shadow); z-index: 20;
+}
+.to-top:active { transform: scale(.94); }
 
 .note {
   width: 100%; margin-top: 8px; padding: 12px 14px; font-size: 16px;

@@ -70,11 +70,13 @@ def collect_flow(cfg: dict) -> dict:
                         seen.add(item["id"])
                         found += 1
                         row = con.execute(
-                            "SELECT description FROM vacancies WHERE id=?",
+                            "SELECT description, published_text FROM "
+                            "vacancies WHERE id=?",
                             (item["id"],)).fetchone()
                         is_new = row is None
                         has_desc = bool((row[0] if row else "") or "")
-                        if (is_new or not has_desc) \
+                        has_pub = bool((row[1] if row else "") or "")
+                        if (is_new or not has_desc or not has_pub) \
                                 and item["url"].startswith("http") \
                                 and details_left > 0:
                             try:
@@ -87,6 +89,11 @@ def collect_flow(cfg: dict) -> dict:
                                     item["rating"] = details["rating"]
                                 if details.get("employer"):
                                     item["employer"] = details["employer"]
+                                if details.get("published_ts"):
+                                    item["published_ts"] = \
+                                        details["published_ts"]
+                                    item["published_text"] = \
+                                        details.get("published_text") or ""
                                 details_left -= 1
                                 polite_sleep()
                             except Firewall:

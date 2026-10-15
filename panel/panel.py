@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-"""🎛️ Панель «Работа MSK» — то самое окно с кнопками.
+"""🎛️ Панель «Работа MSK» — окно с кнопками + жизнь в трее.
 
-Открыл ярлык на рабочем столе → видишь:
-    ▶ Включить сервер   — запускает сбор (Авито → мозг → база → GitHub);
-    ⏹ Выключить сервер  — останавливает всё;
-    рядом: войти в Авито, открыть страницу мамы, опубликовать сейчас,
-    настройки (запросы, интервал, Telegram) и журнал простыми словами.
+Как устроено:
+    · ярлык на рабочем столе → открывает это окно;
+    · окно можно свернуть в трей (крестик прячет, а не закрывает);
+    · в трее иконка 🧹 с меню: открыть панель / вкл-выкл сбора / выход;
+    · автозапуск: папка «Автозагрузка» Windows (ставится кнопкой в
+      настройках) — после перезагрузки ПК сервер поднимается сам;
+    · при включении сбор идёт сразу и дальше каждые 15 минут.
 
 Панель — лицо проекта: сама ничего не собирает, а следит за процессом
 сбора (collect.py) и показывает его статус из data/status.json.
@@ -36,10 +38,9 @@ FG = "#e8eaf2"
 MUTED = "#8b90a5"
 GREEN = "#2e9e63"
 RED = "#c0392b"
-BLUE = "#3b6fd4"
 AMBER = "#c98a1b"
 FONT = ("Segoe UI", 11)
-FONT_BIG = ("Segoe UI", 15, "bold")
+FONT_BIG = ("Segoe UI", 14, "bold")
 FONT_TITLE = ("Segoe UI", 14, "bold")
 
 STATES = {
@@ -50,26 +51,38 @@ STATES = {
     "error": ("🔴", RED),
 }
 
+AUTOSTART_DIR = (Path.home() / "AppData" / "Roaming" / "Microsoft" /
+                 "Windows" / "Start Menu" / "Programs" / "Startup")
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "RabotaMSK"
+
 
 class Panel(tk.Tk):
-    """🎛️ Главное окно."""
+    """🎛️ Главное окно + трей."""
 
     def __init__(self) -> None:
         super().__init__()
         self.title("Работа MSK — сбор вакансий с Авито")
         self.configure(bg=BG)
-        self.geometry("760x560")
-        self.minsize(680, 480)
+        self.geometry("780x580")
+        self.minsize(700, 500)
 
         self.proc: subprocess.Popen | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.cfg = settings.load()
         self.preview_server = None
+        self.tray = None
+        self._quitting = False
+        self._was_running = False
+        self._last_start = 0.0
 
         self._build()
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
         self.after(300, self._pump_log)
         self.after(400, self._tick_status)
+        self._start_tray()
+        if self.cfg.get("auto_start", True):
+            self.after(1200, self._maybe_autostart)
 
     # --- сборка окна -------------------------------------------------------
     def _build(self) -> None:
@@ -88,8 +101,10 @@ class Panel(tk.Tk):
         top = ttk.Frame(self, padding=(16, 14, 16, 6))
         top.pack(fill="x")
         ttk.Label(top, text="🧹 Работа MSK", font=FONT_TITLE).pack(side="left")
+        ttk.Button(top, text="В трей", command=self._hide_to_tray) \
+            .pack(side="right")
         self.lbl_ip = ttk.Label(top, text="", style="Muted.TLabel")
-        self.lbl_ip.pack(side="right")
+        self.lbl_ip.pack(side="right", padx=(0, 12))
 
         body = ttk.Frame(self, padding=(16, 4, 16, 8))
         body.pack(fill="x")
@@ -112,6 +127,11 @@ class Panel(tk.Tk):
         self.lbl_state.pack(anchor="w")
         self.lbl_detail = ttk.Label(status, text="", style="Muted.TLabel")
         self.lbl_detail.pack(anchor="w", pady=(2, 0))
+        self.lbl_hint = ttk.Label(
+            status, text="Окно можно закрыть — сбор продолжит работать "
+                         "в трее (иконка 🧹 рядом с часами).",
+            style="Muted.TLabel")
+        self.lbl_hint.pack(anchor="w", pady=(2, 0))
 
         row2 = ttk.Frame(self, padding=(16, 6, 16, 6))
         row2.pack(fill="x")
@@ -121,6 +141,8 @@ class Panel(tk.Tk):
                    command=self._open_settings).pack(side="left", padx=(10, 0))
         ttk.Button(row2, text="🗑 Очистить журнал",
                    command=self._clear_log).pack(side="left", padx=(10, 0))
+        ttk.Button(row2, text="✖ Выйти совсем",
+                   command=self._quit).pack(side="right")
 
         log_frame = ttk.Frame(self, padding=(16, 4, 16, 14))
         log_frame.pack(fill="both", expand=True)
@@ -131,7 +153,73 @@ class Panel(tk.Tk):
         self.log.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.log.pack(fill="both", expand=True)
-        self._log("Панель готова. Нажмите «Включить сервер».")
+        self._log("Панель готова. «Включить сервер» — и вакансии поехали.")
+
+    # --- трей ---------------------------------------------------------------
+    def _tray_image(self):
+        """🚩 Иконка для трея из наших PNG (msk.ico не читает pystray)."""
+        try:
+            from PIL import Image
+            for name in ("icon-192.png", "apple-touch-icon.png"):
+                path = ROOT / "docs" / name
+                if path.exists():
+                    return Image.open(path)
+        except Exception:
+            pass
+        from PIL import Image
+        return Image.new("RGB", (64, 64), (124, 108, 255))
+
+    def _start_tray(self) -> None:
+        """🧹 Иконка в трее с меню — окно можно закрыть, сервер останется."""
+        try:
+            import pystray
+        except ImportError:
+            self._log("⚠️ pystray не установлен — трей недоступен "
+                      "(pip install pystray pillow).")
+            return
+
+        def open_panel(icon, item):
+            self.after(0, self._show_window)
+
+        def toggle(icon, item):
+            self.after(0, self._toggle)
+
+        def quit_all(icon, item):
+            self.after(0, self._quit)
+
+        def status_text(item):
+            running = bool(self.proc and self.proc.poll() is None)
+            return "⏹ Выключить сбор" if running else "▶ Включить сбор"
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Открыть панель", open_panel, default=True),
+            pystray.MenuItem(status_text, toggle),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Выйти совсем", quit_all),
+        )
+        icon = pystray.Icon("rabota-msk", self._tray_image(),
+                            "Работа MSK — сбор вакансий", menu)
+        self.tray = icon
+        threading.Thread(target=icon.run, daemon=True).start()
+
+    def _hide_to_tray(self) -> None:
+        """🙈 Крестик = свернуть в трей (сбор продолжает работать)."""
+        if self.tray is None:
+            self._stop_server()
+            self.destroy()
+            return
+        self.withdraw()
+        self._log("🙈 Свернулись в трей — сбор продолжается. "
+                  "Иконка 🧹 рядом с часами.")
+
+    def _show_window(self) -> None:
+        """👀 Вернуть окно из трея."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
 
     # --- кнопки -------------------------------------------------------------
     def _toggle(self) -> None:
@@ -141,9 +229,6 @@ class Panel(tk.Tk):
             self._start_server()
 
     def _start_server(self) -> None:
-        if not (self.cfg.get("repo_url") or "").strip():
-            self._log("⚠️ В настройках не задан адрес GitHub-репозитория — "
-                      "сбор пойдёт, но публикации не будет.")
         self.cfg = settings.load()
         env = {**__import__("os").environ,
                "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
@@ -154,6 +239,7 @@ class Panel(tk.Tk):
             errors="replace", bufsize=1, env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         threading.Thread(target=self._reader, daemon=True).start()
+        self._last_start = time.time()
         self.btn_toggle.configure(text="⏹  Выключить сервер")
         self._set_state("idle", "🟡 Сбор запускается…", "")
 
@@ -171,6 +257,13 @@ class Panel(tk.Tk):
         self._set_state("idle", "⚪ Сбор выключен", "")
         self._log("⏹ Сбор остановлен.")
 
+    def _maybe_autostart(self) -> None:
+        """🚀 После открытия панели включаем сбор сразу (если так настроено)."""
+        if self.proc and self.proc.poll() is None:
+            return
+        self._log("🚀 Автозапуск: включаю сбор сразу.")
+        self._start_server()
+
     def _reader(self) -> None:
         """📖 Читает stdout сбора и перекладывает в очередь для окна."""
         proc = self.proc
@@ -183,8 +276,7 @@ class Panel(tk.Tk):
     def _login_avito(self) -> None:
         env = {**__import__("os").environ, "PYTHONUTF8": "1"}
         subprocess.Popen(
-            [sys.executable,
-             str(ROOT / "_tools" / "вход_в_авито.py")],
+            [sys.executable, str(ROOT / "_tools" / "вход_в_авито.py")],
             cwd=str(ROOT), env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self._log("🔑 Открываю окно входа в Авито: нажмите «Продолжить» "
@@ -197,15 +289,15 @@ class Panel(tk.Tk):
             self._log(f"🌐 Открываю страницу: {url}")
         else:
             messagebox.showinfo(
-                "Страница", "Пока не задан адрес страницы.\n"
-                "Он появится в настройках, когда опубликуем проект "
-                "на GitHub Pages.\n\nМожно посмотреть локально кнопкой "
-                "«Посмотреть у себя».")
+                "Страница", "Адрес страницы пока не задан в настройках.\n"
+                "Можно посмотреть локально кнопкой «Посмотреть у себя».")
 
     def _preview(self) -> None:
-        """👁 Локальный предпросмотр страницы мамы (без GitHub)."""
+        """👁 Локальный предпросмотр страницы (без GitHub)."""
         try:
-            store.export_site(store.connect(), store.new_since(store.connect()))
+            con = store.connect()
+            store.export_site(con, store.new_since(con))
+            con.close()
         except Exception:
             pass
         src = store.EXPORT_PATH
@@ -225,8 +317,8 @@ class Panel(tk.Tk):
 
     @staticmethod
     def _serve_docs() -> None:
-        import http.server
         import functools
+        import http.server
         handler = functools.partial(
             http.server.SimpleHTTPRequestHandler,
             directory=str(ROOT / "docs"))
@@ -258,22 +350,73 @@ class Panel(tk.Tk):
             self.log_queue.put(f"⚠️ Публикация не удалась: "
                                f"{type(exc).__name__}: {exc}")
 
+    # --- автозагрузка -------------------------------------------------------
+    def _autostart_enabled(self) -> bool:
+        """Проверить запись автозагрузки в реестре (Run)."""
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+                value, _ = winreg.QueryValueEx(key, RUN_NAME)
+                return bool(value)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return (AUTOSTART_DIR / "Работа MSK.lnk").exists()
+
+    def _set_autostart(self, on: bool) -> None:
+        """🚀 Запись в реестре Run: панель стартует c Windows, без COM."""
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                if on:
+                    winreg.SetValueEx(key, RUN_NAME, 0, winreg.REG_SZ,
+                                      self._autostart_command())
+                else:
+                    try:
+                        winreg.DeleteValue(key, RUN_NAME)
+                    except FileNotFoundError:
+                        pass
+            # прибрать возможный старый ярлык
+            old = AUTOSTART_DIR / "Работа MSK.lnk"
+            if old.exists():
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        except OSError as exc:
+            self._log(f"⚠️ Автозагрузка не настроилась: {exc}")
+            return
+        if on:
+            self._log("🚀 Автозапуск включён: панель откроется сама после "
+                      "перезагрузки ПК.")
+        else:
+            self._log("🛑 Автозапуск выключен.")
+
+    @staticmethod
+    def _autostart_command() -> str:
+        """Команда для реестра: pythonw + panel.py (в кавычках — пути с
+        пробелами и кириллицей). Запускается свёрнуто в трей."""
+        py = Path(sys.executable).with_name("pythonw.exe")
+        if not py.exists():
+            py = Path(sys.executable)
+        return f'"{py}" "{ROOT / "panel" / "panel.py"}" --tray'
+
     # --- настройки ----------------------------------------------------------
     def _open_settings(self) -> None:
         win = tk.Toplevel(self)
         win.title("Настройки")
         win.configure(bg=BG)
-        win.geometry("640x620")
+        win.geometry("660x640")
         win.transient(self)
 
         cfg = settings.load()
         rows = [
             ("Запросы к Авито (по одному в строке)", "queries", "text"),
             ("Интервал автосбора, минут", "interval_min", "int"),
-            ("Минимальная зарплата ₽/мес (0 — все)", "min_salary_month",
-             "int"),
+            ("Минимальная зарплата ₽/мес (0 — все)", "min_salary_month", "int"),
             ("Telegram-токен (опция)", "telegram_token", "str"),
-            ("Telegram chat_id мамы", "telegram_chat", "str"),
+            ("Telegram chat_id", "telegram_chat", "str"),
             ("Адрес GitHub-репозитория", "repo_url", "str"),
             ("Ветка данных", "repo_branch", "str"),
             ("Адрес страницы (GitHub Pages)", "site_url", "str"),
@@ -303,12 +446,24 @@ class Panel(tk.Tk):
         tg.grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(12, 0))
         ttk.Button(tg, text="Проверить бота",
                    command=self._tg_check).pack(side="left")
-        ttk.Button(tg, text="Привязать маму",
+        ttk.Button(tg, text="Привязать чат",
                    command=lambda: self._tg_bind(widgets)
                    ).pack(side="left", padx=(8, 0))
         ttk.Button(tg, text="Отправить тест",
                    command=lambda: self._tg_test(widgets)
                    ).pack(side="left", padx=(8, 0))
+
+        auto_row = ttk.Frame(frame)
+        auto_row.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="w",
+                      pady=(12, 0))
+        auto_var = tk.BooleanVar(value=self._autostart_enabled())
+        tk.Checkbutton(
+            auto_row, text="Запускать панель при включении компьютера "
+                           "(автозагрузка)",
+            variable=auto_var, bg=BG, fg=FG, activebackground=BG,
+            activeforeground=FG, selectcolor=CARD,
+            command=lambda: self._set_autostart(auto_var.get())
+        ).pack(anchor="w")
 
         def save_and_close() -> None:
             new = dict(cfg)
@@ -330,16 +485,14 @@ class Panel(tk.Tk):
             win.destroy()
 
         ttk.Button(frame, text="💾 Сохранить",
-                   command=save_and_close).grid(row=len(rows) + 1, column=0,
+                   command=save_and_close).grid(row=len(rows) + 2, column=0,
                                                 columnspan=2, pady=(16, 0))
 
     def _tg_values(self, widgets) -> tuple[str, str]:
-        token = widgets["telegram_token"].get().strip()
-        chat = widgets["telegram_chat"].get().strip()
-        return token, chat
+        return (widgets["telegram_token"].get().strip(),
+                widgets["telegram_chat"].get().strip())
 
     def _tg_check(self) -> None:
-        """✅ Кнопка «Проверить бота»: берём токен прямо из настроек."""
         ok, msg = notify.check(settings.load().get("telegram_token", ""))
         messagebox.showinfo("Telegram", msg)
 
@@ -361,6 +514,13 @@ class Panel(tk.Tk):
     def _tick_status(self) -> None:
         self.cfg = settings.load()
         running = bool(self.proc and self.proc.poll() is None)
+        # сторож: если сбор упал сам (не по кнопке) — поднимаем заново
+        if (not running and self.proc is not None and not self._quitting
+                and self.cfg.get("auto_restart", True)
+                and time.time() - self._last_start > 60):
+            self._log("♻️ Сбор завершился — перезапускаю через 15 секунд…")
+            self.proc = None
+            self.after(15000, self._maybe_autostart)
         try:
             if store.STATUS_PATH.exists():
                 st = json.loads(store.STATUS_PATH.read_text(encoding="utf-8"))
@@ -436,13 +596,25 @@ class Panel(tk.Tk):
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
 
-    def _on_close(self) -> None:
+    def _quit(self) -> None:
+        """✖ Полный выход: гасим сбор, трей и окно."""
+        self._quitting = True
         self._stop_server()
+        if self.tray is not None:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
         self.destroy()
 
 
 def main() -> None:
-    Panel().mainloop()
+    """Старт панели. `--tray` — открыться сразу в трее (для автозагрузки)."""
+    tray_only = "--tray" in sys.argv
+    app = Panel()
+    if tray_only:
+        app.after(500, app._hide_to_tray)
+    app.mainloop()
 
 
 if __name__ == "__main__":

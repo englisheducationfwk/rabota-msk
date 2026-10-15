@@ -185,10 +185,6 @@ def analyze(item: dict) -> dict:
         score -= 3
         reasons.append((-3, "Нет отзывов о работодателе"))
 
-    if _hits(everything, HOUSE_WORDS):
-        score += 10
-        found = _hits(everything, HOUSE_WORDS)[:2]
-        reasons.append((+10, f"Есть проживание/питание ({', '.join(found)})"))
     if _hits(everything, AGENCY_WORDS) and _hits(title, AGENCY_WORDS):
         score -= 8
         reasons.append((-8, "Кадровое агентство / клининговая сеть"))

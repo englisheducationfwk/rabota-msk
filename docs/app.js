@@ -1,7 +1,7 @@
-/* 🧹 Работа MSK — страница мамы: карточки вакансий, фильтры, избранное.
-   Данные тянет из data/vacancies.json (рядом, тот же домен — CORS не мешает).
-   Всё «моё» (избранное, скрытые, заметки, когда заходила) живёт на телефоне
-   в localStorage и никуда не отправляется. */
+/* 🧹 Работа MSK — страница мамы: карточки, фильтры, избранное, блокировка.
+   Данные — data/vacancies.json (локально) или ветка data на GitHub.
+   Всё «моё» (избранное, скрытые, блокировки, заметки, скролл) живёт
+   на телефоне в localStorage и никуда не отправляется. */
 
 (function () {
   "use strict";
@@ -20,7 +20,7 @@
     items: [],
     updated: 0,
     sort: "score",
-    filters: { new: false, unofficial: false, housing: false, fav: false },
+    filters: { new: false, unofficial: false, fav: false },
     salaryMin: 0,
     q: "",
     expanded: {},
@@ -28,8 +28,10 @@
   };
   var fav = LS.get("msk_fav", {});
   var hidden = LS.get("msk_hidden", {});
+  var blocked = LS.get("msk_blocked", {});   // работодатели «в бан»
   var notes = LS.get("msk_notes", {});
   var noted = LS.get("msk_noted", {});
+  var scrollY = LS.get("msk_scroll_y", 0);
 
   var el = {
     list: document.getElementById("list"),
@@ -43,7 +45,8 @@
     chips: document.getElementById("filter-chips"),
     salary: document.getElementById("salary-min"),
     themeBtn: document.getElementById("theme-btn"),
-    refreshBtn: document.getElementById("refresh-btn")
+    refreshBtn: document.getElementById("refresh-btn"),
+    toTop: document.getElementById("to-top")
   };
 
   /* --- утилиты --- */
@@ -60,7 +63,8 @@
   }
   function ago(ts) {
     if (!ts) return "";
-    var min = Math.floor((Date.now() / 1000 - ts) / 60);
+    var min = Math.floor(Date.now() / 1000 - ts) / 60;
+    min = Math.floor(min);
     if (min < 1) return "только что";
     if (min < 60) return min + " " + plural(min, "минуту", "минуты", "минут") + " назад";
     var h = Math.floor(min / 60);
@@ -73,10 +77,9 @@
     if (!ts) return "";
     var dt = new Date(ts * 1000);
     var today = new Date();
-    var sameDay = dt.toDateString() === today.toDateString();
     var hm = ("0" + dt.getHours()).slice(-2) + ":" +
              ("0" + dt.getMinutes()).slice(-2);
-    if (sameDay) return "сегодня в " + hm;
+    if (dt.toDateString() === today.toDateString()) return "сегодня в " + hm;
     return dt.getDate() + "." + ("0" + (dt.getMonth() + 1)).slice(-2) +
            " в " + hm;
   }
@@ -84,12 +87,18 @@
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   }
   function isRubleSalary(unit) { return unit && unit !== "месяц" && unit !== ""; }
+  function blockKey(it) {
+    return it.employer_id ? "id:" + it.employer_id :
+           (it.employer ? "name:" + String(it.employer).toLowerCase() : "v:" + it.id);
+  }
+  function blockLabel(it) {
+    return it.employer || it.title || "работодатель";
+  }
 
   /* --- данные ---
      Два источника по очереди: сначала соседний файл (локальный
      предпросмотр с компьютера), потом — свежий JSON из ветки данных
-     на GitHub (его каждые 15 минут обновляет компьютер).
-     Если переименуете репозиторий — поправьте адрес ниже. */
+     на GitHub (его каждые 15 минут обновляет компьютер). */
   var RAW_DATA = "https://raw.githubusercontent.com/englisheducationfwk/" +
                  "rabota-msk/data/vacancies.json";
   var SOURCES = ["data/vacancies.json", RAW_DATA];
@@ -102,8 +111,8 @@
     if (i >= SOURCES.length) {
       el.updated.textContent = state.items.length
         ? "Нет связи — показываю последние данные"
-        : "Ждём первые вакансии — они появятся после первого сбора";
-      render();
+        : "Ждём первые вакансии — появятся после первого сбора";
+      render("refresh");
       return;
     }
     var url = SOURCES[i] + (SOURCES[i].indexOf("?") === -1 ? "?" : "&") +
@@ -117,7 +126,7 @@
         if (!d || !d.items) throw new Error("пусто");
         state.items = d.items;
         state.updated = d.updated || 0;
-        render();
+        render("refresh");
         el.updated.textContent = state.updated
           ? ("Обновлено " + timeStr(state.updated) +
              " · вакансий: " + state.items.length)
@@ -130,11 +139,11 @@
   function visibleItems() {
     var q = state.q.trim().toLowerCase();
     var out = state.items.filter(function (it) {
+      if (blocked[blockKey(it)]) return false;
       if (hidden[it.id] && !state.filters.fav) return false;
       if (state.filters.fav && !fav[it.id]) return false;
       if (state.filters.new && !(it.first_seen > state.lastVisit)) return false;
       if (state.filters.unofficial && !it.unofficial) return false;
-      if (state.filters.housing && !it.housing) return false;
       if (state.salaryMin && (it.salary_month || 0) < state.salaryMin)
         return false;
       if (q) {
@@ -160,7 +169,8 @@
   }
 
   /* --- отрисовка --- */
-  function render() {
+  function render(mode) {
+    var keepY = (mode === "refresh") ? (window.scrollY || 0) : 0;
     var items = visibleItems();
     var freshCount = state.items.filter(function (it) {
       return it.first_seen > state.lastVisit;
@@ -172,12 +182,34 @@
       el.newBar.hidden = true;
     }
 
+    var blockedCount = Object.keys(blocked).length;
+    var old = document.getElementById("unblock-chip");
+    if (old) old.remove();
+    if (blockedCount > 0) {
+      var b = document.createElement("button");
+      b.className = "chip block-chip";
+      b.id = "unblock-chip";
+      b.textContent = "⛔ Разблокировать (" + blockedCount + ")";
+      b.addEventListener("click", function () {
+        if (!confirm("Вернуть заблокированных работодателей (" +
+                     blockedCount + ")? Их вакансии снова появятся.")) return;
+        blocked = {};
+        LS.set("msk_blocked", blocked);
+        render("user");
+      });
+      el.chips.appendChild(b);
+    }
+
     el.empty.hidden = items.length > 0;
     el.list.innerHTML = "";
     items.forEach(function (it) {
       el.list.appendChild(card(it));
     });
-    // отметить визит: следующее «Новых» считается от этого момента
+    if (mode === "refresh" && keepY > 40) {
+      window.scrollTo(0, keepY);
+    } else if (mode === "user") {
+      window.scrollTo(0, 0);
+    }
     LS.set("msk_last_visit", Math.floor(Date.now() / 1000));
   }
 
@@ -191,7 +223,6 @@
 
     var badges = [];
     if (it.unofficial) badges.push('<span class="badge hot">🔥 без оформления</span>');
-    if (it.housing) badges.push('<span class="badge">🏠 с проживанием</span>');
     if (it.status === "new") badges.push('<span class="badge new-b">✨ новая</span>');
 
     var rating = "";
@@ -206,6 +237,18 @@
     if (it.salary_month && isRubleSalary(it.salary_unit)) {
       approx = ' <span class="approx">≈ ' + money(it.salary_month) +
                " ₽/мес</span>";
+    }
+
+    // когда опубликовано: точная дата от Авито + насколько давно
+    var when = "";
+    if (it.published_text) {
+      when = "🕐 опубликовано " + esc(it.published_text) +
+             (it.published ? " (" + esc(ago(it.published)) + ")" : "");
+    } else if (it.published) {
+      when = "🕐 опубликовано " + esc(timeStr(it.published)) +
+             " (" + esc(ago(it.published)) + ")";
+    } else if (it.first_seen) {
+      when = "🕐 найдено " + esc(ago(it.first_seen));
     }
 
     var descCls = state.expanded[it.id] ? "desc" : "desc clip";
@@ -227,10 +270,7 @@
       (it.metro || it.address
         ? '<div class="addr">📍 ' + esc(it.metro || it.address) + "</div>"
         : "") +
-      (it.published || it.first_seen
-        ? '<div class="fresh">🕐 ' +
-          esc(ago(it.published || it.first_seen)) + "</div>"
-        : "") +
+      (when ? '<div class="fresh">' + when + "</div>" : "") +
       (it.description
         ? '<div class="' + descCls + '">' + esc(it.description) + "</div>" +
           '<button class="more-btn" data-more="' + esc(it.id) + '">' +
@@ -247,9 +287,11 @@
         '<button class="act hide-act' + (hidden[it.id] ? " on" : "") +
           '" data-hide="' + esc(it.id) + '">' +
           (hidden[it.id] ? "↩️ Показать" : "🚫 Не подходит") + "</button>" +
-        '<a class="act open" style="text-align:center;text-decoration:none" ' +
-          'href="' + esc(it.url) + '" target="_blank" rel="noopener">' +
-          "Открыть</a>" +
+        '<button class="act block-act" data-block="' + esc(blockKey(it)) +
+          '" data-block-label="' + esc(blockLabel(it)) +
+          '">⛔ Заблокировать</button>' +
+        '<a class="act open" href="' + esc(it.url) +
+          '" target="_blank" rel="noopener">Открыть на Авито</a>' +
       "</div>" +
       '<textarea class="note' + (noted[it.id] ? " show" : "") + '" ' +
         'data-notefield="' + esc(it.id) + '" placeholder="Заметка (видна ' +
@@ -262,6 +304,18 @@
   el.list.addEventListener("click", function (ev) {
     var t = ev.target;
     if (!t || t.tagName !== "BUTTON") return;
+    if (t.hasAttribute("data-block")) {
+      var key = t.getAttribute("data-block");
+      var label = t.getAttribute("data-block-label") || "работодателя";
+      if (confirm("Заблокировать «" + label + "»?\n\nВсе вакансии от него " +
+                  "исчезнут из списка — и текущие, и будущие.\n" +
+                  "Вернуть можно кнопкой «Разблокировать» сверху.")) {
+        blocked[key] = label;
+        LS.set("msk_blocked", blocked);
+        render("user");
+      }
+      return;
+    }
     var id = t.getAttribute("data-fav") || t.getAttribute("data-hide") ||
              t.getAttribute("data-note") || t.getAttribute("data-more");
     if (!id) return;
@@ -278,7 +332,9 @@
     } else if (t.hasAttribute("data-more")) {
       state.expanded[id] = !state.expanded[id];
     }
-    render();
+    var y = window.scrollY;
+    render("keep");
+    window.scrollTo(0, y);
   });
 
   el.list.addEventListener("input", function (ev) {
@@ -297,7 +353,7 @@
     Array.prototype.forEach.call(el.seg.children, function (c) {
       c.classList.toggle("on", c === b);
     });
-    render();
+    render("user");
   });
 
   el.chips.addEventListener("click", function (ev) {
@@ -306,21 +362,19 @@
     var key = b.getAttribute("data-filter");
     state.filters[key] = !state.filters[key];
     b.classList.toggle("on", state.filters[key]);
-    if (key === "fav") state.updated = state.updated; // ничего, просто ререндер
-    render();
+    render("user");
   });
 
   el.newBtn.addEventListener("click", function () {
     state.filters.new = true;
     var chip = el.chips.querySelector('[data-filter="new"]');
     if (chip) chip.classList.add("on");
-    render();
-    window.scrollTo(0, 0);
+    render("user");
   });
 
   el.salary.addEventListener("change", function () {
     state.salaryMin = parseInt(el.salary.value, 10) || 0;
-    render();
+    render("user");
   });
 
   var searchTimer = null;
@@ -328,7 +382,7 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () {
       state.q = el.search.value;
-      render();
+      render("user");
     }, 200);
   });
 
@@ -351,8 +405,28 @@
     setTimeout(function () { el.refreshBtn.textContent = "🔄"; }, 900);
   });
 
-  /* --- старт: грузим сразу и потом раз в 3 минуты --- */
+  /* --- скролл: помним где остановилась + кнопка «наверх» --- */
+  var scrollTimer = null;
+  window.addEventListener("scroll", function () {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(function () {
+      LS.set("msk_scroll_y", window.scrollY || 0);
+    }, 250);
+    el.toTop.hidden = (window.scrollY || 0) < 600;
+  }, { passive: true });
+
+  el.toTop.addEventListener("click", function () {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    LS.set("msk_scroll_y", 0);
+  });
+
+  /* --- старт --- */
   fetchData();
+  // восстановить позицию прошлого визита после первой отрисовки
+  setTimeout(function () {
+    var y = LS.get("msk_scroll_y", 0);
+    if (y > 100) { window.scrollTo(0, y); }
+  }, 700);
   setInterval(fetchData, 3 * 60 * 1000);
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) fetchData();
