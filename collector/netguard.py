@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import time
 
 BRIDGE_PORT = 8790
 
@@ -67,20 +68,25 @@ def external_info(session) -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def check_ru(session) -> tuple[bool, str]:
+def check_ru(session, attempts: int = 3) -> tuple[bool, str]:
     """✅ (ок, сообщение): выходим ли мы в интернет как Россия.
 
-    session должна быть уже настроена на прямой канал (bind), иначе
-    получим адрес туннеля и честный «нет».
+    До attempts попыток: разовый сетевой сбой или мигнувший туннель
+    не должны останавливать сбор. Стоп — только если все попытки мимо.
     """
-    info = external_info(session)
+    info: dict = {}
+    for _ in range(max(1, attempts)):
+        info = external_info(session)
+        if "error" not in info and \
+                (info.get("country") or "").upper() == "RU":
+            ip = info.get("ip") or "?"
+            city = info.get("city") or ""
+            return True, f"РУ-IP подтверждён: {ip} ({city})"
+        time.sleep(2)
     if "error" in info:
         return False, f"Не удалось проверить IP: {info['error']}. {_HINT}"
     country = (info.get("country") or "?").upper()
     ip = info.get("ip") or "?"
-    city = info.get("city") or ""
-    if country == "RU":
-        return True, f"РУ-IP подтверждён: {ip} ({city})"
     return False, (f"Интернет видит нас как {country} ({ip}). {_HINT}")
 
 
