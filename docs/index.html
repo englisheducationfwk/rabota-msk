@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Работа MSK · вакансии для мамы</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Работа MSK">
+<meta name="theme-color" content="#0b0e16">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <span class="brand-icon">🧹</span>
+      <div>
+        <div class="brand-title">Работа · Москва</div>
+        <div class="brand-sub" id="updated">Загружаю…</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" id="theme-btn" title="Тема">🌙</button>
+      <button class="icon-btn" id="refresh-btn" title="Обновить">🔄</button>
+    </div>
+  </div>
+  <div class="new-bar" id="new-bar" hidden>
+    <button class="new-btn" id="new-btn">
+      ✨ Новых: <b id="new-count">0</b> · показать
+    </button>
+  </div>
+</header>
+
+<div class="controls">
+  <input class="search" id="search" type="search"
+         placeholder="Поиск: метро, отель, «без оформления»…">
+  <div class="seg" id="sort-seg">
+    <button data-sort="score" class="on">💎 Выгода</button>
+    <button data-sort="salary">💰 Зарплата</button>
+    <button data-sort="fresh">🕐 Свежие</button>
+    <button data-sort="rating">⭐ Рейтинг</button>
+  </div>
+  <div class="chips" id="filter-chips">
+    <button class="chip" data-filter="new">✨ Только новые</button>
+    <button class="chip" data-filter="unofficial">🔥 Без оформления</button>
+    <button class="chip" data-filter="housing">🏠 С проживанием</button>
+    <button class="chip" data-filter="fav">❤️ Избранное</button>
+    <select class="chip salary-sel" id="salary-min">
+      <option value="0">Любая оплата</option>
+      <option value="60000">от 60 000 ₽</option>
+      <option value="80000">от 80 000 ₽</option>
+      <option value="100000">от 100 000 ₽</option>
+      <option value="120000">от 120 000 ₽</option>
+    </select>
+  </div>
+</div>
+
+<main id="list"></main>
+
+<div class="empty" id="empty" hidden>
+  <div class="empty-icon">🌿</div>
+  <div class="empty-title">Пока пусто</div>
+  <div class="empty-text">
+    Вакансии появятся здесь сами — как только папа включит сбор
+    на компьютере. Заходите проверять, всё новое будет сверху.
+  </div>
+</div>
+
+<footer class="foot">
+  <details>
+    <summary>📲 Как поставить на экран Домой (iPhone)</summary>
+    <ol>
+      <li>Откройте эту страницу в <b>Safari</b>.</li>
+      <li>Нажмите кнопку <b>«Поделиться»</b> (квадратик со стрелкой).</li>
+      <li>Пролистайте и выберите <b>«На экран “Домой”</b>».</li>
+      <li>Готово — иконка «Работа MSK» появится как приложение.</li>
+    </ol>
+    <p class="foot-note">Обновляется само каждые 15 минут, пока
+    компьютер включён. Наверху видно, когда данные приехали
+    в последний раз.</p>
+  </details>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
