@@ -627,8 +627,9 @@ class Panel(tk.Tk):
                                          time.localtime(st.get("last_run") or 0))
                     nxt = time.strftime(
                         "%H:%M", time.localtime(st.get("next_run") or 0))
-                    text = (f"🟢 Сбор работает · Обновлено {last} · "
-                            f"Следующее ~{nxt} · Новых: {st.get('fresh', 0)}")
+                    text = (f"🟢 Сбор работает · Собрано {last} · "
+                            f"Следующее ~{nxt} · Новых: {st.get('fresh', 0)}"
+                            f" · обновлено: {st.get('updated', 0)}")
                     self._set_state("ok", text,
                                     st.get("message") or "", color)
                 elif key == "firewall":

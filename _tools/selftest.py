@@ -99,9 +99,12 @@ def test_store() -> None:
         check("в срезе 1 вакансия", payload["count"], 1)
         it = payload["items"][0]
         for field in ("id", "title", "price", "salary_month", "score",
-                      "reasons", "first_seen", "url"):
+                      "reasons", "first_seen", "last_seen", "url"):
             check(f"поле «{field}» есть", field in it, True)
         check("рейтинг дожил", it["rating"]["score"], 4.8)
+        check("повтор — status стал seen", it["status"], "seen")
+        check("last_seen не раньше first_seen",
+              it["last_seen"] >= it["first_seen"], True)
         con.close()
         store.DB_PATH.unlink(missing_ok=True)
         store.EXPORT_PATH.unlink(missing_ok=True)

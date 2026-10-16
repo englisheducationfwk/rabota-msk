@@ -133,7 +133,9 @@ def upsert(con: sqlite3.Connection, item: dict) -> bool:
         url=?, price_text=?, salary_month=?, salary_unit=?, employer=?,
         employer_id=?, metro=?, address=?, published_ts=?, published_text=?,
         description=?, params=?, rating_score=?, rating_reviews=?, score=?,
-        relevant=?, reasons=?, unofficial=?, housing=? WHERE id=?""",
+        relevant=?, reasons=?, unofficial=?, housing=?,
+        status=CASE WHEN status='new' THEN 'seen' ELSE status END
+        WHERE id=?""",
                 (now,) + common + (vid,))
     con.commit()
     return False
@@ -186,7 +188,8 @@ def export_site(con: sqlite3.Connection, fresh_since: int) -> dict:
         SELECT id, title, url, price_text, salary_month, salary_unit,
                employer, metro, address, published_ts, description, score,
                reasons, unofficial, housing, first_seen, rating_score,
-               rating_reviews, employer_id, status, query, published_text
+               rating_reviews, employer_id, status, query, published_text,
+               last_seen
         FROM vacancies
         WHERE relevant=1 AND status != 'hidden'
         ORDER BY first_seen DESC
@@ -204,6 +207,7 @@ def export_site(con: sqlite3.Connection, fresh_since: int) -> dict:
             "first_seen": r[15],
             "rating": ({"score": r[16], "reviews": r[17]} if r[16] else {}),
             "employer_id": r[18], "status": r[19], "query": r[20],
+            "last_seen": r[22],
         })
     payload = {
         "updated": int(time.time()),

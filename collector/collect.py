@@ -40,7 +40,7 @@ def log(msg: str) -> None:
 def collect_flow(cfg: dict) -> dict:
     """🚜 Полный обход Авито и запись в базу (внутри одного цикла)."""
     con = store.connect()
-    found = relevant = fresh = 0
+    found = relevant = fresh = updated = 0
     collected: list[tuple[dict, bool]] = []
     ensure_bridge()
     try:
@@ -127,11 +127,15 @@ def collect_flow(cfg: dict) -> dict:
                 if was_new:
                     fresh += 1
                     new_items.append(verdict)
+                else:
+                    updated += 1
 
         payload = store.export_site(con, fresh_since)
         store.log_run(con, found, relevant, fresh)
-        log(f"   🧠 Подходящих: {relevant}, из них новых: {fresh}")
+        log(f"   🧠 Подходящих: {relevant} · новых: {fresh} · "
+            f"обновлено: {updated}")
         return {"found": found, "relevant": relevant, "fresh": fresh,
+                "updated": updated,
                 "new_items": new_items, "payload": payload}
     finally:
         con.close()
@@ -140,7 +144,7 @@ def collect_flow(cfg: dict) -> dict:
 def run_once(cfg: dict, session) -> dict:
     """▶️ Один цикл со стражем РУ-IP и всей обвязкой."""
     state = {"state": "idle", "message": "", "found": 0, "relevant": 0,
-             "fresh": 0, "last_run": int(time.time()),
+             "fresh": 0, "updated": 0, "last_run": int(time.time()),
              "next_run": int(time.time())
              + max(5, int(cfg.get("interval_min") or 15)) * 60}
     ok, message = check_ru(session)
@@ -155,7 +159,9 @@ def run_once(cfg: dict, session) -> dict:
         stats = collect_flow(cfg)
         state.update({"state": "ok", "found": stats["found"],
                       "relevant": stats["relevant"],
-                      "fresh": stats["fresh"], "message": "сбор прошёл"})
+                      "fresh": stats["fresh"],
+                      "updated": stats["updated"],
+                      "message": "сбор прошёл"})
         if cfg.get("publish") and cfg.get("repo_url"):
             ok_pub, info = publish.publish(cfg["repo_url"],
                                            cfg.get("repo_branch") or "data",

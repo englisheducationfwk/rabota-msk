@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="stylesheet" href="app.css?v=4">
+<link rel="stylesheet" href="app.css?v=5">
 </head>
 <body>
 <header class="top">
@@ -36,16 +36,19 @@
 </header>
 
 <div class="controls">
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="new">✨ Новые <b id="cnt-new">0</b></button>
+    <button class="tab" data-tab="seen">✅ Просмотренные <b id="cnt-seen">0</b></button>
+  </div>
   <input class="search" id="search" type="search"
          placeholder="Поиск: метро, отель, «без оформления»…">
   <div class="seg" id="sort-seg">
-    <button data-sort="score" class="on">💎 Выгода</button>
+    <button data-sort="fresh" class="on">🕐 Свежие</button>
+    <button data-sort="score">💎 Выгода</button>
     <button data-sort="salary">💰 Зарплата</button>
-    <button data-sort="fresh">🕐 Свежие</button>
     <button data-sort="rating">⭐ Рейтинг</button>
   </div>
   <div class="chips" id="filter-chips">
-    <button class="chip" data-filter="new">✨ Только новые</button>
     <button class="chip" data-filter="unofficial">🔥 Без оформления</button>
     <button class="chip" data-filter="fav">❤️ Избранное</button>
     <select class="chip salary-sel" id="salary-min">
@@ -60,18 +63,34 @@
 
 <main id="list"></main>
 
+<button class="more" id="more-btn" hidden></button>
+
 <div class="empty" id="empty" hidden>
-  <div class="empty-icon">🌿</div>
-  <div class="empty-title">Пока пусто</div>
-  <div class="empty-text">
-    Вакансии появятся здесь сами. Заходите проверять —
-    всё новое будет сверху.
+  <div class="empty-icon" id="empty-icon">🌿</div>
+  <div class="empty-title" id="empty-title">Пока пусто</div>
+  <div class="empty-text" id="empty-text">
+    Вакансии появятся здесь сами.
   </div>
 </div>
 
 <button class="to-top" id="to-top" title="Наверх" hidden>⬆️</button>
 
 <footer class="foot">
+  <details>
+    <summary>🧭 Как это устроено (два меню и галочки)</summary>
+    <ul class="foot-list">
+      <li><b>✨ Новые</b> — вакансии, которых вы ещё не видели.</li>
+      <li>Карточка, мимо которой <b>пролистали</b>, сама отмечается
+          «✅ просмотрено» и при следующем обновлении уезжает в меню
+          <b>«✅ Просмотренные»</b>. Сразу скрыть можно кнопкой
+          «✅ Просмотрено» на карточке.</li>
+      <li>Старые вакансии сбор не добавляет заново — он их
+          <b>обновляет</b>. На просмотренной карточке видно
+          «🔄 обновлено 2 часа назад».</li>
+      <li>За раз показываем 30 карточек, дальше кнопка
+          «Показать ещё».</li>
+    </ul>
+  </details>
   <details>
     <summary>📲 Как поставить на экран Домой (iPhone)</summary>
     <ol>
@@ -86,6 +105,6 @@
   </details>
 </footer>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
