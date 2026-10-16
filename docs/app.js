@@ -1,14 +1,17 @@
 /* Работа MSK — страница: два меню (Новые / Просмотренные), порции по 30,
-   отметка «просмотрено», фильтры, избранное, блокировка.
+   фильтры, избранное, блокировка.
    Данные — data/vacancies.json (локально) или ветка data на GitHub.
-   Всё «моё» (просмотрено, избранное, скрытые, блокировки, заметки, скролл)
-   живёт на телефоне в localStorage и никуда не отправляется. */
+   Всё «моё» (просмотрено, избранное, скрытые, блокировки, заметки, позиция)
+   живёт на телефоне в localStorage и никуда не отправляется.
+
+   «Просмотрено» ставится ТОЛЬКО когда открыли вакансию на Авито (кнопка
+   «Открыть на Авито») или нажали «✅ Просмотрено» вручную — и остаётся
+   навсегда: прогоны, обновления и перезаходы отметку не снимают. */
 
 (function () {
   "use strict";
 
   var PER = 30;      // сколько карточек рисуем за раз
-  var DWELL = 400;   // мс в кадре — и карточка считается просмотренной
   var TAB_SORT = { "new": "fresh", seen: "score" };
 
   var LS = {
@@ -21,28 +24,32 @@
     }
   };
 
+  /* Где были в прошлый раз: пиксели + карточка, на которой стояли
+     (новые вакансии приезжают сверху и сдвигают список). */
+  var pos0 = LS.get("msk_pos", null) || {};
+  var startTab = (pos0.tab === "seen") ? "seen" : "new";
+
   var state = {
     items: [],
     updated: 0,
     sig: "",
-    tab: "new",                                  // new | seen
-    sort: TAB_SORT["new"],
+    tab: startTab,                              // new | seen
+    sort: TAB_SORT[startTab],
     filters: { unofficial: false, fav: false },
     salaryMin: 0,
     q: "",
     expanded: {},
-    page: 1
+    page: Math.max(1, parseInt(pos0.page, 10) || 1)
   };
-  var viewed = LS.get("msk_viewed", {});   // id → когда пролистали
+  var viewed = LS.get("msk_viewed", {});   // id → когда открыли на Авито
   var fav = LS.get("msk_fav", {});
   var hidden = LS.get("msk_hidden", {});
   var blocked = LS.get("msk_blocked", {});   // работодатели «в бан»
   var notes = LS.get("msk_notes", {});
   var noted = LS.get("msk_noted", {});
-  var scrollY = LS.get("msk_scroll_y", 0);
   /* Карточки, уже показанные в текущем списке: пока список не перестроен
      (перезаход, смена меню/фильтра/сортировки, 🔄) — они остаются на месте,
-     даже если их только что пометили просмотренными. Список не дёргается. */
+     даже если их только что отметили просмотренными. Список не дёргается. */
   var pinned = {};
 
   var el = {
@@ -128,7 +135,6 @@
   function blockLabel(it) {
     return it.employer || it.title || "работодатель";
   }
-  function nowSec() { return Math.floor(Date.now() / 1000); }
   function cardOf(node) {
     var n = node;
     while (n && n.classList && !n.classList.contains("card")) n = n.parentNode;
@@ -221,7 +227,7 @@
     });
   }
 
-  /* В каком меню карточка: «Новые» — которых ещё не пролистали,
+  /* В каком меню карточка: «Новые» — которые ещё не открывали на Авито,
      «Просмотренные» — остальные. Уже показанные в списке (pinned) держим
      на месте, пока список не перестроят. */
   function inTab(it) {
@@ -254,6 +260,12 @@
     });
   }
 
+  function setTabUI() {
+    Array.prototype.forEach.call(el.tabs.children, function (c) {
+      c.classList.toggle("on", c.getAttribute("data-tab") === state.tab);
+    });
+  }
+
   /* Счётчики меню и полоса «Новых: N» — по всему найденному (с поиском
      и фильтрами), но без учёта самого меню. */
   function updateCounts() {
@@ -275,19 +287,7 @@
     }
   }
 
-  /* --- отметка «просмотрено» --- */
-  var io = null;
-  /* Пока палец на экране — карточки не помечаем: значок ✅ дорисовывается в
-     карточку и сдвигает кнопки, а нажатие не должно уезжать из-под пальца.
-     Как палец ушёл — пересматриваем кадр и метим (ещё раз через DWELL). */
-  var pointerBusy = false;
-  document.addEventListener("pointerdown", function () { pointerBusy = true; });
-  document.addEventListener("pointercancel", function () { pointerBusy = false; });
-  document.addEventListener("pointerup", function () {
-    pointerBusy = false;
-    observeCards();
-  });
-
+  /* --- отметка «просмотрено» (навсегда) --- */
   function setCardViewed(node, on) {
     if (!node) return;
     node.classList.toggle("is-viewed", !!on);
@@ -310,7 +310,7 @@
 
   function markViewed(id, node) {
     if (!id || viewed[id]) return;
-    viewed[id] = nowSec();
+    viewed[id] = Math.floor(Date.now() / 1000);
     LS.set("msk_viewed", viewed);
     setCardViewed(node, true);
     updateCounts();
@@ -324,32 +324,55 @@
     updateCounts();
   }
 
-  /* Карточка побыла в кадре DWELL мс — считаем просмотренной. Так «пролистал»
-     отмечается сам, но мгновенный флинг мимо всего списка ничего не съест. */
-  function observeCards() {
-    if (io) { io.disconnect(); io = null; }
-    if (typeof IntersectionObserver !== "function") return;
-    io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        var node = en.target;
-        if (en.isIntersecting) {
-          if (node._seenTimer) return;
-          node._seenTimer = setTimeout(function () {
-            node._seenTimer = null;
-            if (!document.documentElement.contains(node)) return;
-            if (pointerBusy) return;   // палец на экране — не дёргаем карточку
-            markViewed(node.getAttribute("data-card"), node);
-          }, DWELL);
-        } else if (node._seenTimer) {
-          clearTimeout(node._seenTimer);
-          node._seenTimer = null;
-        }
-      });
-    }, { threshold: 0.15 });
+  /* --- память позиции: вернуться туда же, откуда уходили в Авито ---
+     Уход по «Открыть на Авито» открывает новую вкладку, и iPhone может
+     выгрузить страницу совсем. Поэтому помним не только пиксели, но и
+     карточку, на которой стояли: новые вакансии приезжают сверху и
+     сдвигают список вниз. */
+  function savePos() {
+    var anchor = null;
     var cards = el.list.querySelectorAll(".card[data-card]");
-    Array.prototype.forEach.call(cards, function (c) {
-      if (!c.classList.contains("is-viewed")) io.observe(c);
+    for (var i = 0; i < cards.length; i++) {
+      var r = cards[i].getBoundingClientRect();
+      if (r.bottom > 8) {
+        anchor = { id: cards[i].getAttribute("data-card"),
+                   top: Math.round(r.top) };
+        break;
+      }
+    }
+    LS.set("msk_pos", {
+      y: Math.round(window.scrollY || 0),
+      page: state.page,
+      tab: state.tab,
+      id: anchor ? anchor.id : "",
+      top: anchor ? anchor.top : 0
     });
+  }
+
+  var restoreDone = false;
+  var lastTarget = -1;
+
+  function restorePos() {
+    if (!state.items.length) return;
+    var pos = LS.get("msk_pos", null) || { y: LS.get("msk_scroll_y", 0) };
+    var target = pos.y || 0;
+    if (pos.id) {
+      var cards = el.list.querySelectorAll(".card[data-card]");
+      for (var i = 0; i < cards.length; i++) {
+        if (cards[i].getAttribute("data-card") === pos.id) {
+          target = Math.round((window.scrollY || 0) +
+                              cards[i].getBoundingClientRect().top -
+                              (pos.top || 0));
+          break;
+        }
+      }
+    }
+    if (target < 40) return;
+    /* Если она уже сама ушла листать — не тянем назад. */
+    if (lastTarget >= 0 &&
+        Math.abs((window.scrollY || 0) - lastTarget) > 500) return;
+    window.scrollTo(0, target);
+    lastTarget = target;
   }
 
   /* --- отрисовка ---
@@ -396,9 +419,17 @@
     }
 
     updateCounts();
-    observeCards();
     updateHead();
     if (mode === "rebuild") window.scrollTo(0, 0);
+
+    /* Список приехал — возвращаемся на место, откуда уходили. */
+    if (!restoreDone && shown.length) {
+      restoreDone = true;
+      restorePos();
+      /* Шрифты могут подвинуть строки — поправим позицию ещё раз. */
+      setTimeout(restorePos, 500);
+      setTimeout(restorePos, 1500);
+    }
   }
 
   function setEmpty(count) {
@@ -413,13 +444,13 @@
     } else if (state.tab === "new") {
       el.emptyIcon.textContent = "🎉";
       el.emptyTitle.textContent = "Новых нет";
-      el.emptyText.textContent = "Всё, что приезжало, вы уже пролистали. " +
-        "Заглядывайте — новые вакансии приедут сами.";
+      el.emptyText.textContent = "Всё уже просмотрено. Заглядывайте — " +
+        "новые вакансии приедут сами.";
     } else {
       el.emptyIcon.textContent = "📚";
       el.emptyTitle.textContent = "Пока пусто";
       el.emptyText.textContent = "Здесь появятся вакансии, которые вы " +
-        "пролистали. Новые — в меню «✨ Новые».";
+        "открыли на Авито. Новые — в меню «✨ Новые».";
     }
   }
 
@@ -529,10 +560,11 @@
     var t = ev.target;
     if (!t) return;
 
-    // «Открыть на Авито» — значит, посмотрели
+    /* «Открыть на Авито» — это и есть «просмотрено», навсегда. */
     if (t.tagName === "A" && t.classList.contains("open")) {
       var anode = cardOf(t);
       markViewed(anode ? anode.getAttribute("data-card") : "", anode);
+      savePos();
       return;
     }
     if (t.tagName !== "BUTTON") return;
@@ -559,13 +591,6 @@
     var id = t.getAttribute("data-fav") || t.getAttribute("data-hide") ||
              t.getAttribute("data-note") || t.getAttribute("data-more");
     if (!id) return;
-
-    /* Разобрались с карточкой (открыли описание, взяли в избранное,
-       оставили заметку) — значит, увидели её. */
-    if (t.hasAttribute("data-more") || t.hasAttribute("data-fav") ||
-        t.hasAttribute("data-note")) {
-      markViewed(id, cardOf(t));
-    }
 
     if (t.hasAttribute("data-fav")) {
       if (fav[id]) { delete fav[id]; } else { fav[id] = 1; }
@@ -603,9 +628,7 @@
     state.tab = tab;
     state.sort = TAB_SORT[tab] || "score";
     setSortUI();
-    Array.prototype.forEach.call(el.tabs.children, function (c) {
-      c.classList.toggle("on", c === b);
-    });
+    setTabUI();
     render("rebuild");
   });
 
@@ -638,9 +661,7 @@
       state.tab = "new";
       state.sort = TAB_SORT["new"];
       setSortUI();
-      Array.prototype.forEach.call(el.tabs.children, function (c) {
-        c.classList.toggle("on", c.getAttribute("data-tab") === "new");
-      });
+      setTabUI();
     }
     render("rebuild");
   });
@@ -673,7 +694,7 @@
   });
 
   /* 🔄 — «обновление списка»: подтянуть данные и пересобрать меню заново
-     (просмотренное уезжает в «Просмотренные»). */
+     (открытое на Авито уезжает в «Просмотренные»). */
   el.refreshBtn.addEventListener("click", function () {
     el.refreshBtn.textContent = "⏳";
     render("rebuild");
@@ -681,32 +702,39 @@
     setTimeout(function () { el.refreshBtn.textContent = "🔄"; }, 900);
   });
 
-  /* --- скролл: помним где остановилась + кнопка «наверх» --- */
+  /* --- прокрутка: помним где остановилась + кнопка «наверх» --- */
   var scrollTimer = null;
   window.addEventListener("scroll", function () {
     clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(function () {
-      LS.set("msk_scroll_y", window.scrollY || 0);
-    }, 250);
+    scrollTimer = setTimeout(savePos, 250);
     el.toTop.hidden = (window.scrollY || 0) < 600;
   }, { passive: true });
 
   el.toTop.addEventListener("click", function () {
     window.scrollTo({ top: 0, behavior: "smooth" });
-    LS.set("msk_scroll_y", 0);
+    LS.set("msk_pos", { y: 0, page: state.page, tab: state.tab,
+                        id: "", top: 0 });
+    lastTarget = -1;
+  });
+
+  /* Уходим в Авито (страница прячется) — сохраняем место сразу. */
+  window.addEventListener("pagehide", savePos);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      savePos();
+    } else {
+      fetchData();
+      if (restoreDone) restorePos();
+      else lastTarget = -1;
+    }
   });
 
   /* --- старт --- */
+  setTabUI();
   setSortUI();
   fetchData();
-  // восстановить позицию прошлого визита после первой отрисовки
-  setTimeout(function () {
-    var y = LS.get("msk_scroll_y", 0);
-    if (y > 100) { window.scrollTo(0, y); }
-  }, 700);
-  // обновляем данные раз в 5 минут (и при каждом возврате на страницу)
+  // страховка: если данные приехали позже отрисовки — вернёмся на место
+  setTimeout(function () { if (!restoreDone) restorePos(); }, 1200);
+  // обновляем данные раз в 5 минут
   setInterval(fetchData, 5 * 60 * 1000);
-  document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) fetchData();
-  });
 })();

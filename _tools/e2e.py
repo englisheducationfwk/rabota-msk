@@ -151,9 +151,10 @@ def main() -> int:
     print("🌐 Локальный сервер: http://127.0.0.1:8788/")
 
     def hermetic(ctx) -> None:
-        """🚧 Мимо GitHub: проверяем местный файл, а не живой срез с сети."""
+        """🚧 Мимо GitHub и Авито: проверяем местный файл и не ходим на Авито."""
         ctx.route("**api.github.com**", lambda route: route.abort())
         ctx.route("**raw.githubusercontent.com**", lambda route: route.abort())
+        ctx.route("**avito.ru**", lambda route: route.abort())
 
     SHOTS.mkdir(exist_ok=True)
     from playwright.sync_api import sync_playwright
@@ -196,13 +197,7 @@ def main() -> int:
             return n + s
 
         def settle(ms: int = 800) -> None:
-            """Дать странице успокоиться.
-
-            Автоотметка ✅ дорисовывает значок в карточку и сдвигает её
-            содержимое; кликать в этот момент нельзя — нажатие уедет мимо
-            кнопки. Живому человеку это не грозит (он не жмёт кнопку в ту же
-            секунду, что пересобрался список), а вот тесту — вполне.
-            """
+            """Дать странице успокоиться после клика по карточке."""
             page.wait_for_timeout(ms)
 
         page.goto("http://127.0.0.1:8788/index.html",
@@ -223,25 +218,6 @@ def main() -> int:
             errors.append("ошибки JS: " + "; ".join(console_errors[:3]))
         page.screenshot(path=str(SHOTS / "page_iphone.png"))
 
-        # прокрутка: карточки сами становятся «просмотренными»
-        before = counts()[0]
-        page.mouse.wheel(0, 900)
-        page.wait_for_timeout(900)
-        page.mouse.wheel(0, 900)
-        page.wait_for_timeout(900)
-        after = counts()[0]
-        marked = page.locator(".card.is-viewed").count()
-        print(f"📱 После прокрутки: новых {before} → {after}, "
-              f"карточек с ✅ в кадре: {marked}")
-        if after >= before:
-            errors.append("прокрутка не отметила карточки просмотренными")
-        if marked == 0:
-            errors.append("нет карточек со значком ✅ после прокрутки")
-        page.screenshot(path=str(SHOTS / "page_iphone_scroll.png"))
-        to_top = page.evaluate("!document.getElementById('to-top').hidden")
-        if not to_top:
-            errors.append("кнопка «наверх» не показалась при прокрутке")
-
         # порция «Показать ещё»
         if page.locator("#more-btn").is_visible():
             page.locator("#more-btn").scroll_into_view_if_needed()
@@ -258,27 +234,69 @@ def main() -> int:
         else:
             print("📱 «Показать ещё» не понадобилась (данных меньше порции)")
 
-        # меню «Просмотренные» — пересборка списка
+        # память места: ушли вниз, страницу перезагрузили — вернулись туда же
+        page.mouse.wheel(0, 1200)
+        page.wait_for_timeout(600)
+        page.mouse.wheel(0, 1200)
+        page.wait_for_timeout(700)          # дебаунс сохранения позиции
+        y_before = page.evaluate("window.scrollY")
+        page.screenshot(path=str(SHOTS / "page_iphone_scroll.png"))
+        to_top = page.evaluate("!document.getElementById('to-top').hidden")
+        if not to_top:
+            errors.append("кнопка «наверх» не показалась при прокрутке")
+        if y_before < 300:
+            errors.append(f"страница не прокрутилась (scrollY {y_before})")
+        page.reload(wait_until="networkidle")
+        page.wait_for_timeout(2600)         # отрисовка + поправки позиции
+        y_after = page.evaluate("window.scrollY")
+        print(f"📱 Возврат на место: было {round(y_before)} → "
+              f"стало {round(y_after)}")
+        if abs(y_after - y_before) > 200:
+            errors.append("позиция не вернулась после перезагрузки: "
+                          f"{round(y_before)} → {round(y_after)}")
+
+        # «Открыть на Авито» — вот и вся автоотметка, и она навсегда
+        page.on("popup", lambda pop: pop.close())
+        seen_before = counts()[1]
+        first_card = page.locator(".card").first
+        card_id = first_card.get_attribute("data-card")
+        first_card.locator(".open").click()
+        page.wait_for_timeout(400)
+        seen_after = counts()[1]
+        seen_badge = first_card.locator(".badge.seen").count()
+        print(f"📱 «Открыть на Авито» (карточка {card_id}): просмотренных "
+              f"{seen_before} → {seen_after}, значок ✅: {seen_badge}")
+        if seen_after != seen_before + 1:
+            errors.append("«Открыть на Авито» не отметил карточку "
+                          "просмотренной")
+        if seen_badge != 1:
+            errors.append("на открытой карточке нет значка ✅")
+
+        # после пересборки она живёт в «Просмотренных», а из «Новых» ушла
         page.click('[data-tab="seen"]')
         page.wait_for_timeout(500)
         seen_cards = cards()
-        seen_badges = page.locator(".card .badge.seen").count()
         seen_counter = counts()[1]
+        in_seen = page.locator(f'.card[data-card="{card_id}"]').count()
         print(f"📱 Меню «Просмотренные»: карточек {seen_cards}, "
-              f"счётчик {seen_counter}")
+              f"счётчик {seen_counter}, открытая на месте: {in_seen}")
         if seen_cards == 0:
             errors.append("меню «Просмотренные» пустое")
-        if seen_badges != seen_cards:
-            errors.append("не у всех просмотренных карточек значок ✅")
+        if in_seen != 1:
+            errors.append("открытая на Авито карточка не попала "
+                          "в «Просмотренные»")
         page.screenshot(path=str(SHOTS / "page_tab_seen.png"))
 
         page.click('[data-tab="new"]')
         page.wait_for_timeout(500)
         back = cards()
         left_new = counts()[0]
+        still_there = page.locator(f'.card[data-card="{card_id}"]').count()
         print(f"📱 «Новые» после пересборки: карточек {back}, "
-              f"счётчик {left_new}")
-        # карточек ровно min(30, непросмотренные) + 1–2, отметившиеся в кадре
+              f"счётчик {left_new}, открытая ещё в «Новых»: {still_there}")
+        if still_there:
+            errors.append("открытая на Авито карточка осталась в «Новых»")
+        # карточек ровно min(30, непросмотренные) + 1–2 «хвостика» порции
         if back > PER or back < min(PER, left_new):
             errors.append(f"«Новые» не сошлись со счётчиком: карточек {back}, "
                           f"новых {left_new}")
